@@ -28,7 +28,7 @@ func TestSessionName(t *testing.T) {
 		project, name string
 		want          string
 	}{
-		{"borscht", "feature-123", "we-borscht-feature-123"},
+		{"example-service", "feature-123", "we-example-service-feature-123"},
 		{"my.repo", "fix:thing", "we-my-repo-fix-thing"},
 		{"proj", "feature/login", "we-proj-feature-login"},
 		{"proj", "with spaces", "we-proj-with-spaces"},
