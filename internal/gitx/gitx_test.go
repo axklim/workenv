@@ -2,15 +2,15 @@ package gitx
 
 import "testing"
 
-const porcelain = `worktree /Users/u/projects/borscht
+const porcelain = `worktree /Users/u/projects/example-service
 HEAD abcdefabcdefabcdefabcdefabcdefabcdefabcd
 branch refs/heads/main
 
-worktree /Users/u/projects/.we/borscht/feature-x
+worktree /Users/u/projects/.we/example-service/feature-x
 HEAD 1234561234561234561234561234561234561234
 branch refs/heads/feature-x
 
-worktree /Users/u/projects/.we/borscht/detached
+worktree /Users/u/projects/.we/example-service/detached
 HEAD 9999999999999999999999999999999999999999
 detached
 `
@@ -20,7 +20,7 @@ func TestParseWorktrees(t *testing.T) {
 	if len(wts) != 3 {
 		t.Fatalf("got %d worktrees, want 3: %+v", len(wts), wts)
 	}
-	if wts[0].Path != "/Users/u/projects/borscht" || wts[0].Branch != "main" {
+	if wts[0].Path != "/Users/u/projects/example-service" || wts[0].Branch != "main" {
 		t.Errorf("wts[0] = %+v", wts[0])
 	}
 	if wts[1].Branch != "feature-x" {
@@ -36,10 +36,10 @@ func TestParseGitHubRemote(t *testing.T) {
 		url         string
 		owner, repo string
 	}{
-		{"git@github.com:acme/borscht.git", "acme", "borscht"},
-		{"https://github.com/acme/borscht.git", "acme", "borscht"},
-		{"https://github.com/acme/borscht", "acme", "borscht"},
-		{"ssh://git@github.com/acme/borscht.git", "acme", "borscht"},
+		{"git@github.com:acme/example-service.git", "acme", "example-service"},
+		{"https://github.com/acme/example-service.git", "acme", "example-service"},
+		{"https://github.com/acme/example-service", "acme", "example-service"},
+		{"ssh://git@github.com/acme/example-service.git", "acme", "example-service"},
 	}
 	for _, tt := range tests {
 		owner, repo, ok := parseGitHubRemote(tt.url)
@@ -47,7 +47,7 @@ func TestParseGitHubRemote(t *testing.T) {
 			t.Errorf("parseGitHubRemote(%q) = %q, %q, %v", tt.url, owner, repo, ok)
 		}
 	}
-	if _, _, ok := parseGitHubRemote("https://gitlab.com/acme/borscht.git"); ok {
+	if _, _, ok := parseGitHubRemote("https://gitlab.com/acme/example-service.git"); ok {
 		t.Error("non-github remote should not parse")
 	}
 }

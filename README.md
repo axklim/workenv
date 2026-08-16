@@ -6,24 +6,41 @@ worktree on the right branch, a tmux session with `claude` running in the
 first window, and a Ghostty window attached to it.
 
 ```
-we create https://github.com/acme/borscht/issues/123
+we create https://github.com/acme/example-service/issues/123
 ```
 
-…finds (or clones) `borscht`, creates the branch `issue-123-<title-slug>`
-in a fresh worktree, starts the tagged tmux session
-`we-borscht-issue-123-<title-slug>` with claude running, and opens Ghostty
-attached to it. Run it again and it simply brings the same environment back
-into focus.
+…finds (or clones) `example-service`, creates the branch
+`issue-123-<title-slug>` in a fresh worktree, starts the tagged tmux
+session `we-example-service-issue-123-<title-slug>` with claude running,
+and opens Ghostty attached to it. Run it again and it simply brings the
+same environment back into focus.
 
 ## Prerequisites
 
-`git`, `gh` (authenticated), `tmux`, [Ghostty](https://ghostty.org), Go (to build).
+`git`, `gh` (authenticated), `tmux`, [Ghostty](https://ghostty.org). Building
+needs either a Go toolchain or Docker.
 
 ## Install
+
+With Go installed:
 
 ```
 go build -o ~/bin/we ./cmd/we
 ```
+
+Without it — every `make` target runs the Go toolchain in a container, so
+Docker is the only build dependency. The build cross-compiles for the host,
+so `bin/we` is a native binary, not a Linux one:
+
+```
+make build     # -> bin/we
+make install   # -> ~/bin/we
+make check     # gofmt, go vet, tests
+```
+
+`make help` lists all targets. `GO_IMAGE`, `BIN`, `INSTALL_DIR`, `CACHE_DIR`
+and `GOOS`/`GOARCH` are overridable — e.g.
+`make build GOOS=linux GOARCH=amd64`.
 
 ## Usage
 
@@ -35,11 +52,14 @@ we delete <name> [flags]      tear down
 
 `<target>` is one of:
 
-| Target | Example | Branch | Environment name |
-|---|---|---|---|
-| GitHub issue URL | `.../borscht/issues/123` | `issue-123-<title-slug>` | same as branch |
-| GitHub PR URL | `.../borscht/pull/456` | PR head branch (or `pr-456` for fork PRs) | `pr-456` |
-| plain name | `feature-123` | `feature-123` | same |
+| Target           | Example                          | Branch                   | Environment name |
+|------------------|----------------------------------|--------------------------|------------------|
+| GitHub issue URL | `.../example-service/issues/123` | `issue-123-<title-slug>` | same as branch   |
+| GitHub PR URL    | `.../example-service/pull/456`   | PR head branch           | `pr-456`         |
+| plain name       | `feature-123`                    | `feature-123`            | same             |
+
+A PR from a fork has no head branch on origin to track, so its branch is
+`pr-456` too, materialized from `refs/pull/456/head`.
 
 Plain names use the repository you're standing in, or `--project <name>` to
 pick one from the projects directory.
