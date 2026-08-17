@@ -5,7 +5,7 @@
 GO_IMAGE    ?= golang:1.23.5
 DOCKER      ?= docker
 BIN         ?= bin/we
-INSTALL_DIR ?= $(HOME)/bin
+INSTALL_DIR ?= $(HOME)/.local/bin
 
 # The container is Linux, but the binary has to run on *this* machine, so
 # builds always cross-compile to the host's OS/arch. Override GOOS/GOARCH to
@@ -61,7 +61,7 @@ fmt-check: | $(CACHE_DIR) ## Fail if any source needs gofmt
 
 check: fmt-check vet test ## Run gofmt check, go vet and the tests
 
-install: build ## Install the binary into ~/bin (override INSTALL_DIR)
+install: build ## Install the binary into ~/.local/bin (override INSTALL_DIR)
 	@mkdir -p "$(INSTALL_DIR)"
 	install -m 0755 "$(BIN)" "$(INSTALL_DIR)/we"
 	@echo "installed $(INSTALL_DIR)/we"

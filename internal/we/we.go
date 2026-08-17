@@ -1,12 +1,19 @@
-// Package we orchestrates the Smart work environment flows described in the
-// design doc: tear up (project → worktree → tmux session running claude →
-// terminal), tear down, and a stateless listing.
+// Package we orchestrates the work environment flows: open (find or create
+// the project checkout, worktree and tmux session running claude, then
+// surface it in a terminal), attach (find only), delete and list.
 //
-// Statelessness: nothing is persisted. A work environment is fully
-// identified by (project, name) — the worktree lives at the deterministic
-// path <worktrees_dir>/<project>/<name>, the tmux session is named
-// we-<project>-<name> and tagged with @workenv_* user options, and issue/PR
-// numbers are encoded in branch and environment names.
+// A work environment is a record in the state registry (package state)
+// keyed by an integer id: its branch, tmux session and worktree path are
+// stored, not derived, so nothing has to be encoded in names. GitHub issue
+// and PR references are attached to the record as canonical URLs, which is
+// how an issue URL and its linked PR URL resolve to the same environment.
+// Git stays the truth for the branch: it is refreshed from the worktree
+// whenever an environment is opened or listed, and the refreshed value is
+// persisted back to the registry.
+//
+// Resolution order is always registry, then GitHub, then git worktrees
+// (see resolve.go). open and attach share that one path and differ only in
+// whether resolution may create a new environment when nothing is found.
 package we
 
 import (
@@ -14,14 +21,18 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"workenv/internal/config"
 	"workenv/internal/execx"
 	"workenv/internal/gh"
 	"workenv/internal/gitx"
 	"workenv/internal/naming"
+	"workenv/internal/state"
 	"workenv/internal/target"
 	"workenv/internal/tmuxx"
+	"workenv/internal/wtpath"
 )
 
 type Env struct {
@@ -29,173 +40,276 @@ type Env struct {
 	R   execx.Runner
 	// GOOS controls terminal integration (Ghostty via `open` on darwin).
 	GOOS string
-	// Cwd is where we was invoked; a repo containing it is preferred over
-	// the projects directory.
+	// Cwd is where we was invoked; a repository containing it is preferred
+	// when resolving GitHub targets, and used to mark the current environment
+	// in List.
 	Cwd string
 	// InsideTmux indicates we runs inside a tmux client already.
 	InsideTmux bool
+	// StatePath is the JSON registry of work environments.
+	StatePath string
 }
 
-type UpOptions struct {
-	Target     target.Target
-	Project    string // explicit project name override
+// OpenOptions describes a target to find or create a work environment for.
+// Branch, Session and Wt only take effect when a new environment is
+// created; on a hit they are reported back as ignored (OpenResult.IgnoredOverrides).
+type OpenOptions struct {
+	Target target.Target
+	Repo   string // --repo <name|path>: repository for a plain-name/branch target
+
+	Branch, Session, Wt string // creation overrides
+
+	// AttachOnly finds — through the registry, GitHub links and git
+	// worktrees — but never creates, clones or fetches.
+	AttachOnly bool
 	NoTerminal bool
 }
 
-type DownOptions struct {
-	Force        bool // remove worktree even if dirty
+type OpenResult struct {
+	ID                       int
+	Project, Branch, Session string
+	WorktreePath, RepoPath   string
+	Created                  bool
+	IgnoredOverrides         []string // e.g. ["--branch", "--wt"]
+}
+
+type DeleteOptions struct {
+	Force        bool // remove the worktree even if it has local changes
 	DeleteBranch bool
 	KeepWorktree bool
 }
 
-type UpResult struct {
-	Project string
-	Name    string
-	Branch  string
-	Path    string
-	Session string
-	RepoDir string
-}
-
+// Item is one row of `we ls` / the result of `we show`.
 type Item struct {
-	Project      string
-	Name         string
-	Branch       string
-	Path         string
-	Session      string
-	SessionState string // attached | detached | none
+	ID                       int
+	Project, Branch, Session string
+	SessionState             string // attached | detached | none
+	WorktreePath, RepoPath   string
+	Issues, PRs              []string
+	Exists, Current          bool
+	CreatedAt                time.Time
 }
 
 func (e *Env) git() gitx.Git     { return gitx.Git{R: e.R} }
 func (e *Env) tmux() tmuxx.Tmux  { return tmuxx.Tmux{R: e.R} }
 func (e *Env) github() gh.Client { return gh.Client{R: e.R} }
 
-// Up is the tear-up flow: resolve the project repository (cloning bare if
-// needed), find or create the worktree, find or create the tagged tmux
-// session with claude in the first window, and surface it in a terminal.
-func (e *Env) Up(opts UpOptions) (UpResult, error) {
-	project, repoDir, name, branch, prNumber, err := e.resolve(opts)
+// Open finds the work environment for the target — creating it unless
+// opts.AttachOnly — repairs its worktree and tmux session, saves the
+// registry and surfaces the session in a terminal.
+func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
+	st, err := state.Load(e.StatePath)
 	if err != nil {
-		return UpResult{}, err
+		return OpenResult{}, err
 	}
-
-	if prNumber > 0 {
-		if err := e.git().FetchPRBranch(repoDir, prNumber, branch); err != nil {
-			return UpResult{}, err
-		}
+	env, created, err := e.resolve(st, opts)
+	if err != nil {
+		return OpenResult{}, err
 	}
-
-	// Worktree: reuse wherever the branch is already checked out.
-	path, ok := e.git().WorktreeForBranch(repoDir, branch)
-	if !ok {
-		path = filepath.Join(e.Cfg.WorktreesDir, project, naming.Sanitize(name))
-		if err := e.git().AddWorktree(repoDir, path, branch); err != nil {
-			return UpResult{}, err
-		}
+	if err := e.repair(env, created); err != nil {
+		return OpenResult{}, err
 	}
-
-	// tmux session, tagged so `we list` can find it later.
-	session := naming.SessionName(project, name)
-	if !e.tmux().Has(session) {
-		if err := e.tmux().New(session, path, project, naming.Sanitize(name)); err != nil {
-			return UpResult{}, err
-		}
-		if err := e.tmux().RunInFirstWindow(session, e.Cfg.ClaudeCmd); err != nil {
-			return UpResult{}, err
-		}
+	if err := st.Save(); err != nil {
+		return OpenResult{}, err
 	}
-
+	var ignored []string
+	if !created {
+		ignored = ignoredOverrides(opts)
+	}
 	if !opts.NoTerminal {
-		if err := e.showInTerminal(session); err != nil {
-			return UpResult{}, err
+		if err := e.showInTerminal(env.TmuxSession); err != nil {
+			return OpenResult{}, err
 		}
 	}
-
-	return UpResult{Project: project, Name: name, Branch: branch, Path: path, Session: session, RepoDir: repoDir}, nil
+	return OpenResult{
+		ID: env.ID, Project: env.Project, Branch: env.Branch, Session: env.TmuxSession,
+		WorktreePath: env.WorktreePath, RepoPath: env.RepoPath, Created: created,
+		IgnoredOverrides: ignored,
+	}, nil
 }
 
-// resolve maps the target onto (project, repoDir, name, branch) and, for
-// PRs, the number whose head must be fetched (0 otherwise).
-func (e *Env) resolve(opts UpOptions) (project, repoDir, name, branch string, prNumber int, err error) {
-	t := opts.Target
-	switch t.Kind {
-	case target.KindIssue:
-		issue, ierr := e.github().Issue(t.Owner, t.Repo, t.Number)
-		if ierr != nil {
-			return "", "", "", "", 0, ierr
-		}
-		repoDir, err = e.projectRepo(t.Owner, t.Repo, true)
-		if err != nil {
-			return "", "", "", "", 0, err
-		}
-		branch = naming.BranchForIssue(issue.Number, issue.Title)
-		return t.Repo, repoDir, branch, branch, 0, nil
-
-	case target.KindPR:
-		pr, perr := e.github().PR(t.Owner, t.Repo, t.Number)
-		if perr != nil {
-			return "", "", "", "", 0, perr
-		}
-		repoDir, err = e.projectRepo(t.Owner, t.Repo, true)
-		if err != nil {
-			return "", "", "", "", 0, err
-		}
-		name = naming.PRName(pr.Number)
-		// Same-repo PRs track the real head branch; fork PRs get a local
-		// pr-N branch materialized from refs/pull/N/head.
-		if e.git().BranchExists(repoDir, "refs/heads/"+pr.HeadRefName) ||
-			e.git().BranchExists(repoDir, "refs/remotes/origin/"+pr.HeadRefName) {
-			return t.Repo, repoDir, name, pr.HeadRefName, 0, nil
-		}
-		return t.Repo, repoDir, name, name, pr.Number, nil
-
-	default: // KindName
-		name = t.Name
-		project = opts.Project
-		if project == "" {
-			if top := e.git().TopLevel(e.Cwd); top != "" {
-				project = filepath.Base(top)
-				repoDir = top
-			}
-		}
-		if project == "" {
-			return "", "", "", "", 0, fmt.Errorf("not inside a repository: pass --project (looked in %s)", e.Cfg.ProjectsDir)
-		}
-		if repoDir == "" {
-			dir, found := gitx.FindProjectDir(e.Cfg.ProjectsDir, project)
-			if !found {
-				return "", "", "", "", 0, fmt.Errorf("project %q not found in %s", project, e.Cfg.ProjectsDir)
-			}
-			repoDir = dir
-		}
-		return project, repoDir, name, name, 0, nil
+// ignoredOverrides names the creation overrides the caller passed, for
+// reporting when they landed on a hit instead of a creation.
+func ignoredOverrides(opts OpenOptions) []string {
+	var out []string
+	if opts.Branch != "" {
+		out = append(out, "--branch")
 	}
+	if opts.Session != "" {
+		out = append(out, "--session")
+	}
+	if opts.Wt != "" {
+		out = append(out, "--wt")
+	}
+	return out
 }
 
-// projectRepo locates the repository for owner/repo: the repo containing
-// the current directory when its origin matches, then the projects
-// directory, then (optionally) a fresh bare clone with refs setup.
-func (e *Env) projectRepo(owner, repo string, cloneIfMissing bool) (string, error) {
-	if top := e.git().TopLevel(e.Cwd); top != "" {
-		if o, r, ok := e.git().OriginGitHubRepo(top); ok && o == owner && r == repo {
-			return top, nil
+// create records a new environment for sp: project and session are derived
+// (or taken from opts), the worktree location is decided (override,
+// adoption, or the placement template), the two are checked against the
+// registry for collisions, the branch is prepared for fork/same-repo PRs,
+// and the record is added — but not yet materialised on disk or in tmux;
+// that is repair's job, run uniformly for a hit and a fresh creation alike.
+func (e *Env) create(st *state.Store, opts OpenOptions, sp spec, existingPath string) (*state.Env, error) {
+	project := e.git().ProjectName(sp.repoPath)
+
+	session := naming.Sanitize(opts.Session)
+	if session == "" {
+		session = naming.SessionName(project, sp.branch)
+	}
+	if other := st.BySession(session); other != nil {
+		return nil, fmt.Errorf("tmux session %q already belongs to environment %d; pass --session", session, other.ID)
+	}
+
+	wtPath, err := e.worktreePath(sp, project, opts.Wt, existingPath)
+	if err != nil {
+		return nil, err
+	}
+	if other := st.ByWorktree(wtPath); other != nil {
+		return nil, fmt.Errorf("worktree %q already belongs to environment %d; pass --wt", wtPath, other.ID)
+	}
+
+	switch {
+	case sp.forkPR > 0:
+		if err := e.git().FetchPRBranch(sp.repoPath, sp.forkPR, sp.branch); err != nil {
+			return nil, err
+		}
+	case sp.fetch:
+		if err := e.git().EnsureOriginBranch(sp.repoPath, sp.branch); err != nil {
+			return nil, err
 		}
 	}
-	if dir, found := gitx.FindProjectDir(e.Cfg.ProjectsDir, repo); found {
-		return dir, nil
+
+	env := &state.Env{
+		Project: project, Branch: sp.branch, TmuxSession: session,
+		WorktreePath: wtPath, RepoPath: sp.repoPath, CreatedAt: time.Now().UTC(),
 	}
-	if !cloneIfMissing {
-		return "", fmt.Errorf("project %q not found in %s", repo, e.Cfg.ProjectsDir)
+	st.Link(env, sp.issues, sp.prs)
+	st.Add(env)
+	return env, nil
+}
+
+// worktreePath decides where a new (or freshly adopted) environment's
+// worktree lives: an explicit --wt wins outright — verbatim (expanded,
+// resolved against the repository and cleaned) when it looks like a path,
+// otherwise substituted for the branch when rendering the placement
+// template; absent an override, a worktree already checked out on the
+// branch (existingPath) is adopted; otherwise the template is rendered
+// against the real branch.
+//
+// A branch can only be checked out in one worktree, so when both an
+// override and an existing checkout are present and they disagree, --wt is
+// asking git to check the same branch out a second time — which `git
+// worktree add` refuses with a confusing "already checked out at ..."
+// error. That case is caught here instead, before create ever calls git.
+func (e *Env) worktreePath(sp spec, project, override, existingPath string) (string, error) {
+	if override == "" {
+		if existingPath != "" {
+			return existingPath, nil
+		}
+		return e.renderPlacement(sp, project, sp.branch)
 	}
-	dest := filepath.Join(e.Cfg.ProjectsDir, repo+".git")
-	if err := os.MkdirAll(e.Cfg.ProjectsDir, 0o755); err != nil {
+	wtPath, err := e.overriddenWtPath(sp, project, override)
+	if err != nil {
 		return "", err
 	}
-	fmt.Fprintf(os.Stderr, "cloning %s/%s (bare) into %s\n", owner, repo, dest)
-	if err := e.git().CloneBare(owner+"/"+repo, dest); err != nil {
-		return "", err
+	if existingPath != "" && wtPath != existingPath {
+		return "", fmt.Errorf("branch %q is already checked out at %s; --wt cannot check it out a second time", sp.branch, existingPath)
 	}
-	return dest, nil
+	return wtPath, nil
+}
+
+// overriddenWtPath resolves a non-empty --wt: verbatim (expanded, resolved
+// against the repository and cleaned) when it looks like a path, otherwise
+// substituted for the branch when rendering the placement template.
+func (e *Env) overriddenWtPath(sp spec, project, override string) (string, error) {
+	if strings.ContainsAny(override, "/\\") || strings.HasPrefix(override, "~") {
+		return resolveWtPath(override, sp.repoPath), nil
+	}
+	return e.renderPlacement(sp, project, override)
+}
+
+// resolveWtPath turns a verbatim --wt value into an absolute, clean path:
+// ~ expands, a still-relative value resolves against the repository (the
+// same base wtpath.Render uses), and the result is cleaned — so it matches
+// exactly what git and a later os.Stat/ByWorktree lookup will see, a
+// trailing slash included.
+func resolveWtPath(override, repoPath string) string {
+	p := expandHome(override)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(repoPath, p)
+	}
+	return filepath.Clean(p)
+}
+
+func (e *Env) renderPlacement(sp spec, project, branch string) (string, error) {
+	return wtpath.Render(e.Cfg.WorktreePath, wtpath.Vars{
+		RepoPath: sp.repoPath, Repo: repoBase(sp.repoPath), Project: project, Owner: sp.owner, Branch: branch,
+	})
+}
+
+// repair makes sure env's worktree directory and tmux session exist —
+// creating them when missing exactly like it would to bring a stale
+// environment back after a reboot or a deleted directory — and refreshes
+// its branch from git, the truth for it. It runs for a hit as much as for
+// a fresh creation: create only records where things should be, this is
+// what actually materialises them. created selects which of the two
+// Adoption refusal messages repairSession gives on a session-name conflict:
+// --session still helps on a fresh creation, but cannot on a hit.
+func (e *Env) repair(env *state.Env, created bool) error {
+	if err := e.repairWorktree(env); err != nil {
+		return err
+	}
+	if err := e.repairSession(env, created); err != nil {
+		return err
+	}
+	if b := e.git().CurrentBranch(env.WorktreePath); b != "" {
+		env.Branch = b
+	}
+	return nil
+}
+
+// repairWorktree re-adds env's worktree when its directory is missing. When
+// the directory is present it must actually be a git checkout — a stray
+// directory left at the recorded path (by hand, or by whatever removed the
+// real worktree) is not one, and starting a session there instead of a
+// checkout would be worse than the missing-directory case repair exists to
+// fix.
+func (e *Env) repairWorktree(env *state.Env) error {
+	if _, err := os.Stat(env.WorktreePath); err == nil {
+		if e.git().CurrentBranch(env.WorktreePath) == "" {
+			return fmt.Errorf("%s exists but is not a git checkout", env.WorktreePath)
+		}
+		return nil
+	}
+	if err := e.git().Prune(env.RepoPath); err != nil {
+		return err
+	}
+	return e.git().AddWorktree(env.RepoPath, env.WorktreePath, env.Branch)
+}
+
+// repairSession creates and tags the session when it is missing. A session
+// that is already live is reused only when it carries the @workenv tag —
+// otherwise it belongs to someone else, and we must not touch it. The
+// refusal differs by case (see the design doc's Adoption paragraph):
+// creating a new environment, --session picks another name and genuinely
+// helps; for an environment that already exists, --session cannot change
+// anything (it is a creation-only override, ignored on a hit), so the
+// message instead points at the conflicting session itself.
+func (e *Env) repairSession(env *state.Env, created bool) error {
+	if e.tmux().Has(env.TmuxSession) {
+		if !e.tmux().IsWorkenv(env.TmuxSession) {
+			if created {
+				return fmt.Errorf("tmux session %q already exists and is not a workenv session; pass --session", env.TmuxSession)
+			}
+			return fmt.Errorf("tmux session %q (environment %d) is taken by a session we does not own; rename or kill it, or run `we delete %d`", env.TmuxSession, env.ID, env.ID)
+		}
+		return nil
+	}
+	if err := e.tmux().New(env.TmuxSession, env.WorktreePath, env.ID); err != nil {
+		return err
+	}
+	return e.tmux().RunInFirstWindow(env.TmuxSession, e.Cfg.ClaudeCmd)
 }
 
 // showInTerminal implements the "define terminal" step: switch the current
@@ -234,155 +348,219 @@ func (e *Env) AttachRemote(host, session string) error {
 	return e.openTerminal("ssh", "-t", host, "tmux", "attach-session", "-t", session)
 }
 
-// Down is the tear-down flow: kill the tmux session and remove the
-// worktree (and optionally the branch). It is forgiving: whatever half of
-// the environment still exists gets cleaned up.
-func (e *Env) Down(name, project string, opts DownOptions) error {
-	if project == "" {
-		resolved, err := e.findProjectFor(name)
+// Delete tears down the environment for the target: kills the tmux
+// session, removes the worktree (unless KeepWorktree) and optionally the
+// branch, and drops the record. Resolution goes through the registry only
+// — delete never queries GitHub or clones. It reports the id and tmux
+// session of what it deleted, so the caller can name the resolved
+// environment instead of echoing back whatever ambiguous target string
+// (id, session, branch, or issue/PR URL) the user happened to type. A
+// target resolved through killStray — a live tagged session with no
+// registry record — has no id; id is 0 in that case.
+func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, session string, err error) {
+	st, err := state.Load(e.StatePath)
+	if err != nil {
+		return 0, "", err
+	}
+	env, err := e.lookupRegistry(st, t, repo)
+	if err != nil {
+		return 0, "", err
+	}
+	if env == nil {
+		killed, err := e.killStray(t)
 		if err != nil {
-			return err
+			return 0, "", err
 		}
-		project = resolved
+		return 0, killed, nil
 	}
-	repoDir, found := gitx.FindProjectDir(e.Cfg.ProjectsDir, project)
-	if !found {
-		if top := e.git().TopLevel(e.Cwd); top != "" && filepath.Base(top) == project {
-			repoDir = top
-			found = true
+	id, session = env.ID, env.TmuxSession
+	if e.tmux().Has(env.TmuxSession) {
+		if e.tmux().IsWorkenv(env.TmuxSession) {
+			if err := e.tmux().Kill(env.TmuxSession); err != nil {
+				return 0, "", err
+			}
+		} else {
+			// Someone else's session, not ours to touch (see Adoption in
+			// the design doc); teardown still proceeds for the rest.
+			fmt.Fprintf(os.Stderr, "we: tmux session %q is not a workenv session; leaving it running\n", env.TmuxSession)
 		}
 	}
-
-	session := naming.SessionName(project, name)
-	killed := false
-	if e.tmux().Has(session) {
-		if err := e.tmux().Kill(session); err != nil {
-			return err
-		}
-		killed = true
-	}
-
 	if opts.KeepWorktree {
-		if !killed {
-			return fmt.Errorf("nothing to tear down for %s/%s", project, name)
+		return id, session, nil
+	}
+	if env.WorktreePath == env.RepoPath {
+		// The main working tree: git refuses to remove it (even with
+		// --force) and removing its branch would leave the repository
+		// without a checked-out HEAD, so both steps are skipped.
+		fmt.Fprintf(os.Stderr, "we: %s is the repository's main working tree; leaving it and its branch in place\n", env.WorktreePath)
+	} else {
+		if _, err := os.Stat(env.WorktreePath); err == nil {
+			if err := e.git().RemoveWorktree(env.RepoPath, env.WorktreePath, opts.Force); err != nil {
+				return 0, "", err
+			}
+		} else {
+			// Directory already gone: just let git forget it.
+			_ = e.git().Prune(env.RepoPath)
 		}
-		return nil
-	}
-	if !found {
-		return fmt.Errorf("project %q not found in %s (session %s %s)", project, e.Cfg.ProjectsDir, session,
-			map[bool]string{true: "killed", false: "not found either"}[killed])
-	}
-
-	path := filepath.Join(e.Cfg.WorktreesDir, project, naming.Sanitize(name))
-	branch := ""
-	removed := false
-	if wts, err := e.git().ListWorktrees(repoDir); err == nil {
-		for _, wt := range wts {
-			if wt.Path == path {
-				branch = wt.Branch
-				if err := e.git().RemoveWorktree(repoDir, path, opts.Force); err != nil {
-					return err
-				}
-				removed = true
-				break
+		if opts.DeleteBranch && env.Branch != "" {
+			if err := e.git().DeleteBranch(env.RepoPath, env.Branch); err != nil {
+				return 0, "", err
 			}
 		}
 	}
-	if !killed && !removed {
-		return fmt.Errorf("nothing to tear down for %s/%s", project, name)
+	st.Remove(env.ID)
+	if err := st.Save(); err != nil {
+		return 0, "", err
 	}
-	if opts.DeleteBranch && branch != "" {
-		if err := e.git().DeleteBranch(repoDir, branch); err != nil {
-			return err
-		}
-	}
-	return nil
+	return id, session, nil
 }
 
-// findProjectFor recovers the project of a work environment from the tmux
-// session tags or the worktree directory layout — no state file needed.
-func (e *Env) findProjectFor(name string) (string, error) {
-	var candidates []string
-	if sessions, err := e.tmux().List(); err == nil {
-		for _, s := range sessions {
-			if s.WeName == naming.Sanitize(name) {
-				candidates = append(candidates, s.Project)
-			}
-		}
+// killStray is delete's last resort for a target that is not in the
+// registry: a live @workenv-tagged tmux session by that name — a lost or
+// hand-edited registry — still gets killed, and its name reported back so
+// the caller has something to print. Anything else is unknown.
+func (e *Env) killStray(t target.Target) (string, error) {
+	if t.Kind == target.KindName && e.tmux().Has(t.Name) && e.tmux().IsWorkenv(t.Name) {
+		return t.Name, e.tmux().Kill(t.Name)
 	}
-	if len(candidates) == 0 {
-		entries, _ := os.ReadDir(e.Cfg.WorktreesDir)
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(e.Cfg.WorktreesDir, entry.Name(), naming.Sanitize(name))); err == nil {
-				candidates = append(candidates, entry.Name())
-			}
-		}
-	}
-	switch len(candidates) {
-	case 0:
-		return "", fmt.Errorf("no work environment named %q found; pass --project", name)
-	case 1:
-		return candidates[0], nil
-	default:
-		return "", fmt.Errorf("%q exists in multiple projects (%v); pass --project", name, candidates)
-	}
+	return "", notFoundInRegistry(t)
 }
 
-// List merges tmux sessions (tagged with @workenv_*) and worktrees found
-// under the deterministic layout into one view.
+// notFoundInRegistry is delete's and show's "nothing matched" message. A
+// repository-URL target gets a more specific explanation: unlike an issue
+// or PR URL, it was never a lookup key recorded on any environment, so it
+// can never resolve to one.
+func notFoundInRegistry(t target.Target) error {
+	if t.Kind == target.KindRepo {
+		return fmt.Errorf("a repository URL does not identify a single environment; pass its id, session or branch")
+	}
+	return fmt.Errorf("no work environment for %s", t.String())
+}
+
+// Show resolves like Delete — the registry only — and reports the same
+// Item List would for that environment.
+func (e *Env) Show(t target.Target, repo string) (Item, error) {
+	st, err := state.Load(e.StatePath)
+	if err != nil {
+		return Item{}, err
+	}
+	env, err := e.lookupRegistry(st, t, repo)
+	if err != nil {
+		return Item{}, err
+	}
+	if env == nil {
+		return Item{}, notFoundInRegistry(t)
+	}
+	sessions, err := e.tmux().List()
+	if err != nil {
+		return Item{}, err
+	}
+	item, _ := e.toItem(env, sessions)
+	return item, nil
+}
+
+// List renders every registered environment with live tmux state; the
+// branch is read from the worktree when it exists (git is the truth for
+// it), exactly as open refreshes it on a hit — see the design doc's Model
+// section ("refreshed from the worktree whenever an environment is opened
+// or listed") and its "Rename the branch mid-flight" use case ("the
+// listing shows claude-md, and the record is updated"). Any environment
+// whose stored branch actually changed is written back in a single Save
+// once every item has been processed; nothing is saved when nothing
+// changed.
 func (e *Env) List() ([]Item, error) {
-	items := map[string]Item{}
-
+	st, err := state.Load(e.StatePath)
+	if err != nil {
+		return nil, err
+	}
 	sessions, err := e.tmux().List()
 	if err != nil {
 		return nil, err
 	}
+	items := make([]Item, 0, len(st.Envs))
+	changed := false
+	for _, env := range st.Envs {
+		item, refreshed := e.toItem(env, sessions)
+		items = append(items, item)
+		changed = changed || refreshed
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	if changed {
+		if err := st.Save(); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+// toItem builds env's Item, refreshing its branch from the worktree when
+// one exists. The bool reports whether that refresh actually changed the
+// stored branch, so List can Save once at the end rather than per item;
+// Show ignores it, since a single lookup that is not being saved has
+// nothing to batch.
+func (e *Env) toItem(env *state.Env, sessions []tmuxx.Session) (Item, bool) {
+	item := Item{
+		ID: env.ID, Project: env.Project, Branch: env.Branch, Session: env.TmuxSession,
+		WorktreePath: env.WorktreePath, RepoPath: env.RepoPath,
+		Issues: env.Issues, PRs: env.PRs, CreatedAt: env.CreatedAt,
+		SessionState: "none",
+	}
 	for _, s := range sessions {
-		state := "detached"
-		if s.Attached {
-			state = "attached"
-		}
-		items[s.Project+"/"+s.WeName] = Item{
-			Project: s.Project, Name: s.WeName, Path: s.Path,
-			Session: s.Name, SessionState: state,
+		if s.Name == env.TmuxSession {
+			item.SessionState = "detached"
+			if s.Attached {
+				item.SessionState = "attached"
+			}
+			break
 		}
 	}
+	changed := false
+	if _, err := os.Stat(env.WorktreePath); err == nil {
+		item.Exists = true
+		if b := e.git().CurrentBranch(env.WorktreePath); b != "" && b != env.Branch {
+			env.Branch = b
+			changed = true
+		}
+		item.Branch = env.Branch
+	}
+	item.Current = within(env.WorktreePath, e.Cwd)
+	return item, changed
+}
 
-	projects, _ := os.ReadDir(e.Cfg.WorktreesDir)
-	for _, p := range projects {
-		if !p.IsDir() {
-			continue
-		}
-		wts, _ := os.ReadDir(filepath.Join(e.Cfg.WorktreesDir, p.Name()))
-		for _, wt := range wts {
-			if !wt.IsDir() {
-				continue
-			}
-			key := p.Name() + "/" + wt.Name()
-			path := filepath.Join(e.Cfg.WorktreesDir, p.Name(), wt.Name())
-			item, exists := items[key]
-			if !exists {
-				item = Item{Project: p.Name(), Name: wt.Name(), Path: path, SessionState: "none"}
-			}
-			if branch, berr := e.R.Output(path, "git", "rev-parse", "--abbrev-ref", "HEAD"); berr == nil {
-				item.Branch = branch
-			}
-			items[key] = item
-		}
+// within reports whether child is parent itself or somewhere inside it.
+func within(parent, child string) bool {
+	if parent == "" || child == "" {
+		return false
 	}
+	parent, child = filepath.Clean(parent), filepath.Clean(child)
+	if parent == child {
+		return true
+	}
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
 
-	var out []Item
-	for _, item := range items {
-		out = append(out, item)
+// repoBase is the .repo placement variable: the repository directory's
+// basename, without any bare ".git" suffix.
+func repoBase(repoPath string) string {
+	return strings.TrimSuffix(filepath.Base(repoPath), ".git")
+}
+
+// expandHome expands a leading ~ or ~/ to the home directory; anything else
+// is returned unchanged.
+func expandHome(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Project != out[j].Project {
-			return out[i].Project < out[j].Project
-		}
-		return out[i].Name < out[j].Name
-	})
-	return out, nil
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }

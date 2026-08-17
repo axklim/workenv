@@ -1,9 +1,11 @@
 // Package tmuxx manages the tmux sessions backing work environments.
 //
-// The PDF asks whether tmux sessions support extra attributes: they do —
-// user options ("@"-prefixed, settable per session). workenv marks its
-// sessions with @workenv_* options, which makes `we list` stateless: the
-// sessions themselves are the registry.
+// Sessions carry two tmux user options ("@"-prefixed, settable per
+// session): @workenv=1 and @workenv_id=<id>. They are not the registry —
+// the state package's JSON file is — but they let we tell its own sessions
+// from personal ones, which matters for listing (only tagged sessions are
+// live work environments) and adoption (an untagged session of the same
+// name is never reused or killed).
 package tmuxx
 
 import (
@@ -17,11 +19,10 @@ type Tmux struct {
 	R execx.Runner
 }
 
-// Session is a tmux session that carries workenv markers.
+// Session is a live tmux session tagged by we.
 type Session struct {
 	Name     string
-	Project  string
-	WeName   string
+	ID       int
 	Path     string
 	Attached bool
 }
@@ -32,47 +33,48 @@ func (t Tmux) Has(name string) bool {
 	return err == nil
 }
 
-// New creates a detached session rooted at dir and tags it with workenv
-// user options so it can be told apart from regular tmux sessions.
-func (t Tmux) New(name, dir, project, weName string) error {
-	if _, err := t.R.Output("", "tmux", "new-session", "-d", "-s", name, "-c", dir); err != nil {
+// IsWorkenv reports whether the live session name carries the @workenv tag.
+// It is what tells a we session apart from a stranger's session of the same
+// name, which must never be adopted or killed.
+func (t Tmux) IsWorkenv(name string) bool {
+	out, err := t.R.Output("", "tmux", "show-options", "-t", name, "@workenv")
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
+// New creates a detached session rooted at dir and tags it with the
+// environment's id.
+func (t Tmux) New(session, dir string, id int) error {
+	if _, err := t.R.Output("", "tmux", "new-session", "-d", "-s", session, "-c", dir); err != nil {
 		return err
 	}
-	options := map[string]string{
-		"@workenv":         "1",
-		"@workenv_project": project,
-		"@workenv_name":    weName,
-		"@workenv_path":    dir,
+	// No "=" prefix here: set-option resolves a pane target in tmux 3.5,
+	// which rejects the exact-match syntax. Exact names still win over
+	// prefix matches, so the bare name is unambiguous.
+	if _, err := t.R.Output("", "tmux", "set-option", "-t", session, "@workenv", "1"); err != nil {
+		return err
 	}
-	for key, val := range options {
-		// No "=" prefix here: set-option resolves a pane target in tmux 3.5,
-		// which rejects the exact-match syntax. Exact names still win over
-		// prefix matches, so the bare name is unambiguous.
-		if _, err := t.R.Output("", "tmux", "set-option", "-t", name, key, val); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := t.R.Output("", "tmux", "set-option", "-t", session, "@workenv_id", strconv.Itoa(id))
+	return err
 }
 
 // RunInFirstWindow types cmd into the session's first window. send-keys is
 // used instead of passing the command to new-session so the window (and
 // session) survives the command exiting.
-func (t Tmux) RunInFirstWindow(name, cmd string) error {
+func (t Tmux) RunInFirstWindow(session, cmd string) error {
 	// send-keys takes a pane target, which rejects the "=" exact-match syntax.
-	_, err := t.R.Output("", "tmux", "send-keys", "-t", name, cmd, "Enter")
+	_, err := t.R.Output("", "tmux", "send-keys", "-t", session, cmd, "Enter")
 	return err
 }
 
-func (t Tmux) Kill(name string) error {
-	_, err := t.R.Output("", "tmux", "kill-session", "-t", "="+name)
+func (t Tmux) Kill(session string) error {
+	_, err := t.R.Output("", "tmux", "kill-session", "-t", "="+session)
 	return err
 }
 
-// List returns all workenv-tagged sessions. A stopped tmux server means no
-// sessions, not an error.
+// List returns every workenv-tagged live session. A stopped tmux server
+// means no sessions, not an error.
 func (t Tmux) List() ([]Session, error) {
-	format := "#{session_name}\t#{@workenv_project}\t#{@workenv_name}\t#{@workenv_path}\t#{session_attached}"
+	format := "#{session_name}\t#{@workenv_id}\t#{session_path}\t#{session_attached}"
 	out, err := t.R.Output("", "tmux", "list-sessions", "-F", format)
 	if err != nil {
 		if strings.Contains(err.Error(), "no server running") ||
@@ -85,31 +87,37 @@ func (t Tmux) List() ([]Session, error) {
 }
 
 // HasClients reports whether any terminal is currently attached.
-func (t Tmux) HasClients(name string) bool {
-	out, err := t.R.Output("", "tmux", "list-clients", "-t", "="+name)
+func (t Tmux) HasClients(session string) bool {
+	out, err := t.R.Output("", "tmux", "list-clients", "-t", "="+session)
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
 // SwitchClient jumps the current tmux client to the session (used when we
 // is invoked from inside tmux).
-func (t Tmux) SwitchClient(name string) error {
-	_, err := t.R.Output("", "tmux", "switch-client", "-t", "="+name)
+func (t Tmux) SwitchClient(session string) error {
+	_, err := t.R.Output("", "tmux", "switch-client", "-t", "="+session)
 	return err
 }
 
 func parseSessions(raw string) []Session {
 	var sessions []Session
 	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
-		fields := strings.Split(line, "\t")
-		if len(fields) != 5 || fields[1] == "" {
+		if line == "" {
 			continue
 		}
-		attached, _ := strconv.Atoi(fields[4])
+		fields := strings.Split(line, "\t")
+		if len(fields) != 4 || fields[1] == "" {
+			continue
+		}
+		id, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+		attached, _ := strconv.Atoi(fields[3])
 		sessions = append(sessions, Session{
 			Name:     fields[0],
-			Project:  fields[1],
-			WeName:   fields[2],
-			Path:     fields[3],
+			ID:       id,
+			Path:     fields[2],
 			Attached: attached > 0,
 		})
 	}

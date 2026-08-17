@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"workenv/internal/wtpath"
 )
 
 func TestDefaults(t *testing.T) {
@@ -12,11 +14,11 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if want := filepath.Join(home, "projects"); cfg.ProjectsDir != want {
-		t.Errorf("ProjectsDir = %q, want %q", cfg.ProjectsDir, want)
+	if want := filepath.Join(home, "projects"); cfg.ProjectsPath != want {
+		t.Errorf("ProjectsPath = %q, want %q", cfg.ProjectsPath, want)
 	}
-	if want := filepath.Join(home, "projects", ".we"); cfg.WorktreesDir != want {
-		t.Errorf("WorktreesDir = %q, want %q", cfg.WorktreesDir, want)
+	if cfg.WorktreePath != wtpath.Default {
+		t.Errorf("WorktreePath = %q, want %q (default template)", cfg.WorktreePath, wtpath.Default)
 	}
 	if cfg.ClaudeCmd != "claude" {
 		t.Errorf("ClaudeCmd = %q, want claude", cfg.ClaudeCmd)
@@ -30,8 +32,8 @@ func TestParseOverrides(t *testing.T) {
 	home := "/home/u"
 	raw := `
 # comment
-projects_dir = "~/src"
-worktrees_dir = "/data/wt"
+projects_path = "~/src"
+worktree_path = "~/worktrees/{{ .project }}/{{ .branch | sanitize }}"
 claude_cmd = "claude --dangerously-skip-permissions"
 remote_we = "/usr/local/bin/we"
 `
@@ -39,11 +41,11 @@ remote_we = "/usr/local/bin/we"
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if cfg.ProjectsDir != "/home/u/src" {
-		t.Errorf("ProjectsDir = %q, want /home/u/src (tilde expanded)", cfg.ProjectsDir)
+	if cfg.ProjectsPath != "/home/u/src" {
+		t.Errorf("ProjectsPath = %q, want /home/u/src (tilde expanded)", cfg.ProjectsPath)
 	}
-	if cfg.WorktreesDir != "/data/wt" {
-		t.Errorf("WorktreesDir = %q, want /data/wt", cfg.WorktreesDir)
+	if cfg.WorktreePath != "~/worktrees/{{ .project }}/{{ .branch | sanitize }}" {
+		t.Errorf("WorktreePath = %q, want verbatim template (no tilde expansion)", cfg.WorktreePath)
 	}
 	if cfg.ClaudeCmd != "claude --dangerously-skip-permissions" {
 		t.Errorf("ClaudeCmd = %q", cfg.ClaudeCmd)
@@ -53,13 +55,30 @@ remote_we = "/usr/local/bin/we"
 	}
 }
 
-func TestWorktreesDirFollowsProjectsDir(t *testing.T) {
-	cfg, err := parse(`projects_dir = "/code"`, "/home/u")
+func TestEmptyPathsFallBackToDefaults(t *testing.T) {
+	home := "/home/u"
+	raw := `
+projects_path = ""
+worktree_path = ""
+`
+	cfg, err := parse(raw, home)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if cfg.WorktreesDir != "/code/.we" {
-		t.Errorf("WorktreesDir = %q, want /code/.we", cfg.WorktreesDir)
+	if want := filepath.Join(home, "projects"); cfg.ProjectsPath != want {
+		t.Errorf("empty projects_path: ProjectsPath = %q, want %q (default)", cfg.ProjectsPath, want)
+	}
+	if cfg.WorktreePath != wtpath.Default {
+		t.Errorf("empty worktree_path: WorktreePath = %q, want %q (default)", cfg.WorktreePath, wtpath.Default)
+	}
+}
+
+func TestParseRejectsRetiredKeys(t *testing.T) {
+	if _, err := parse(`projects_dir = "x"`, "/home/u"); err == nil {
+		t.Error("expected error for retired projects_dir key, got nil")
+	}
+	if _, err := parse(`worktrees_dir = "x"`, "/home/u"); err == nil {
+		t.Error("expected error for retired worktrees_dir key, got nil")
 	}
 }
 

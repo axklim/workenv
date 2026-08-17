@@ -10,8 +10,12 @@ type Fake struct {
 }
 
 type FakeCall struct {
-	Dir  string
-	Argv []string
+	// Method is which Runner method recorded the call ("Output", "Run" or
+	// "OutputPassStderr"), so a test can assert the caller used the one it
+	// meant to, not just the argv.
+	Method string
+	Dir    string
+	Argv   []string
 }
 
 type FakeResponse struct {
@@ -21,11 +25,18 @@ type FakeResponse struct {
 }
 
 func (f *Fake) Output(dir, name string, args ...string) (string, error) {
-	return f.record(dir, name, args)
+	return f.record("Output", dir, name, args)
+}
+
+// OutputPassStderr behaves exactly like Output for a Fake — there is no
+// real stderr stream to pass through in a test — but records the call
+// under its own Method so a test can tell the two apart.
+func (f *Fake) OutputPassStderr(dir, name string, args ...string) (string, error) {
+	return f.record("OutputPassStderr", dir, name, args)
 }
 
 func (f *Fake) Run(dir, name string, args ...string) error {
-	_, err := f.record(dir, name, args)
+	_, err := f.record("Run", dir, name, args)
 	return err
 }
 
@@ -38,9 +49,9 @@ func (f *Fake) Joined() []string {
 	return out
 }
 
-func (f *Fake) record(dir, name string, args []string) (string, error) {
+func (f *Fake) record(method, dir, name string, args []string) (string, error) {
 	argv := append([]string{name}, args...)
-	f.Calls = append(f.Calls, FakeCall{Dir: dir, Argv: argv})
+	f.Calls = append(f.Calls, FakeCall{Method: method, Dir: dir, Argv: argv})
 	joined := strings.Join(argv, " ")
 	for _, r := range f.Responses {
 		if strings.HasPrefix(joined, r.Prefix) {

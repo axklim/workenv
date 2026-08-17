@@ -1,6 +1,6 @@
 // Package gitx wraps the git operations workenv needs: locating project
-// repositories, bare-cloning missing ones (with fetch-refspec setup so
-// origin-tracking branches work), and managing worktrees.
+// repositories from any layout (normal clone, bare container, worktree),
+// cloning missing ones normally, and managing worktrees.
 package gitx
 
 import (
@@ -47,33 +47,47 @@ func isRepoDir(dir string) bool {
 	return false
 }
 
-// TopLevel returns the repository root containing dir, or "" if dir is not
-// inside a work tree.
-func (g Git) TopLevel(dir string) string {
-	out, err := g.R.Output(dir, "git", "rev-parse", "--show-toplevel")
+// RepoRoot returns the repository containing dir, whatever the layout: the
+// parent of a ".git" (or ".bare") common dir — a normal clone or a bare
+// container, seen from the checkout, a worktree or the container itself —
+// or the common dir for a bare "repo.git". "" when dir is not in a repo.
+func (g Git) RepoRoot(dir string) string {
+	out, err := g.R.Output(dir, "git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || out == "" {
+		return ""
+	}
+	common := filepath.Clean(out)
+	if base := filepath.Base(common); base == ".git" || base == ".bare" {
+		return filepath.Dir(common)
+	}
+	return common
+}
+
+// CurrentBranch returns the branch checked out in worktree, "" when HEAD is
+// detached or the directory is not a checkout.
+func (g Git) CurrentBranch(worktree string) string {
+	out, err := g.R.Output(worktree, "git", "symbolic-ref", "--short", "-q", "HEAD")
 	if err != nil {
 		return ""
 	}
 	return out
 }
 
-// CloneBare clones owner/repo bare into dest via gh (which honors the
-// user's preferred git protocol) and sets up refs so that origin-tracking
-// branches behave like in a normal clone.
-func (g Git) CloneBare(ownerRepo, dest string) error {
-	if err := g.R.Run("", "gh", "repo", "clone", ownerRepo, dest, "--", "--bare"); err != nil {
-		return err
+// Clone clones ownerRepo into dest via gh (which honors the user's
+// preferred git protocol). A normal clone already has the standard fetch
+// refspec and origin/HEAD, so nothing further is needed.
+func (g Git) Clone(ownerRepo, dest string) error {
+	return g.R.Run("", "gh", "repo", "clone", ownerRepo, dest)
+}
+
+// ProjectName is the display name for the repository at repoPath: the
+// GitHub repository name when origin points at GitHub, else repoPath's
+// basename with any ".git" suffix removed.
+func (g Git) ProjectName(repoPath string) string {
+	if _, repo, ok := g.OriginGitHubRepo(repoPath); ok {
+		return repo
 	}
-	if _, err := g.R.Output(dest, "git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
-		return err
-	}
-	if err := g.R.Run(dest, "git", "fetch", "origin"); err != nil {
-		return err
-	}
-	if _, err := g.R.Output(dest, "git", "remote", "set-head", "origin", "--auto"); err != nil {
-		return err
-	}
-	return nil
+	return strings.TrimSuffix(filepath.Base(repoPath), ".git")
 }
 
 // DefaultBranch resolves the branch new work should start from:
@@ -149,6 +163,22 @@ func (g Git) FetchPRBranch(repoDir string, prNumber int, branch string) error {
 		fmt.Sprintf("pull/%d/head:refs/heads/%s", prNumber, branch))
 }
 
+// EnsureOriginBranch makes refs/remotes/origin/<branch> available for a
+// branch that exists on origin but was pushed after the last fetch. The
+// explicit refspec also works in bare repos that have no fetch refspec.
+func (g Git) EnsureOriginBranch(repoDir, branch string) error {
+	if g.BranchExists(repoDir, "refs/heads/"+branch) || g.BranchExists(repoDir, "refs/remotes/origin/"+branch) {
+		return nil
+	}
+	return g.R.Run(repoDir, "git", "fetch", "origin",
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch))
+}
+
+// Prune forgets worktrees whose directories are gone.
+func (g Git) Prune(repoDir string) error {
+	return g.R.Run(repoDir, "git", "worktree", "prune")
+}
+
 func (g Git) RemoveWorktree(repoDir, path string, force bool) error {
 	args := []string{"worktree", "remove"}
 	if force {
@@ -158,7 +188,7 @@ func (g Git) RemoveWorktree(repoDir, path string, force bool) error {
 	if err := g.R.Run(repoDir, "git", args...); err != nil {
 		return err
 	}
-	return g.R.Run(repoDir, "git", "worktree", "prune")
+	return g.Prune(repoDir)
 }
 
 func (g Git) DeleteBranch(repoDir, branch string) error {
