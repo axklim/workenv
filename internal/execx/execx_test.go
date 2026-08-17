@@ -25,6 +25,26 @@ func TestRealOutputErrorIncludesStderr(t *testing.T) {
 	}
 }
 
+func TestRealOutputPassStderrReturnsTrimmedStdout(t *testing.T) {
+	out, err := Real{}.OutputPassStderr("", "sh", "-c", "echo hello; echo oops >&2")
+	if err != nil {
+		t.Fatalf("OutputPassStderr error: %v", err)
+	}
+	if out != "hello" {
+		t.Errorf("OutputPassStderr = %q, want %q (trimmed, stderr excluded)", out, "hello")
+	}
+}
+
+func TestRealOutputPassStderrErrorIncludesCommand(t *testing.T) {
+	_, err := Real{}.OutputPassStderr("", "sh", "-c", "exit 1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "sh -c exit 1") {
+		t.Errorf("error %q does not include the command", err.Error())
+	}
+}
+
 func TestFakeMatchesByPrefixAndRecords(t *testing.T) {
 	f := &Fake{Responses: []FakeResponse{
 		{Prefix: "git worktree list", Out: "some output"},

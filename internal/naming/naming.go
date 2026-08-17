@@ -1,6 +1,7 @@
-// Package naming derives stateless identifiers (branch names, tmux session
-// names) so that a work environment can always be re-discovered from its
-// name alone, without any state storage.
+// Package naming derives default identifiers (branch names from issue
+// titles, tmux session names) and sanitises user-supplied ones. Nothing is
+// encoded in a name any more: the state registry records what belongs
+// together.
 package naming
 
 import (
@@ -30,24 +31,26 @@ func Slugify(s string) string {
 	return slug
 }
 
-// SessionName builds the tmux session name for a work environment.
-// tmux target syntax reserves ':' and '.', so all unsafe characters are
-// normalized to dashes.
-func SessionName(project, name string) string {
-	return "we-" + Sanitize(project) + "-" + Sanitize(name)
+// SessionName builds the tmux session name for a work environment: the
+// project and branch, sanitized and joined with a dash. tmux target syntax
+// reserves ':' and '.', so unsafe characters become dashes.
+func SessionName(project, branch string) string {
+	return Sanitize(project) + "-" + Sanitize(branch)
 }
 
-// BranchForIssue encodes the issue number into the branch name; this is what
-// keeps the program stateless (the number is recoverable from the name).
+// BranchForIssue is the default branch for an issue: the title slug, so the
+// branch reads like the work. Only a title with no usable characters falls
+// back to issue-N.
 func BranchForIssue(num int, title string) string {
 	if slug := Slugify(title); slug != "" {
-		return fmt.Sprintf("issue-%d-%s", num, slug)
+		return slug
 	}
 	return fmt.Sprintf("issue-%d", num)
 }
 
-// PRName is the work-environment name for a pull request checkout.
-func PRName(num int) string {
+// PRBranch is the local branch a fork PR is materialised on (its head branch
+// does not exist on origin).
+func PRBranch(num int) string {
 	return fmt.Sprintf("pr-%d", num)
 }
 

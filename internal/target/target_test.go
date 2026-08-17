@@ -39,6 +39,72 @@ func TestParsePRURL(t *testing.T) {
 	}
 }
 
+func TestParseRepoURL(t *testing.T) {
+	tests := []string{
+		"https://github.com/acme/proj",
+		"https://github.com/acme/proj.git",
+		"https://github.com/acme/proj/",
+		"github.com/acme/proj",
+	}
+	for _, in := range tests {
+		got, err := Parse(in)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", in, err)
+		}
+		want := Target{Kind: KindRepo, Owner: "acme", Repo: "proj"}
+		if got != want {
+			t.Errorf("Parse(%q) = %+v, want %+v", in, got, want)
+		}
+	}
+}
+
+func TestURLIsCanonical(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"https://github.com/acme/proj/issues/123?x=1", "https://github.com/acme/proj/issues/123"},
+		{"http://github.com/acme/proj/issues/123/", "https://github.com/acme/proj/issues/123"},
+		{"https://github.com/acme/proj/pull/456#discussion", "https://github.com/acme/proj/pull/456"},
+		{"github.com/acme/proj/pull/456/files", "https://github.com/acme/proj/pull/456"},
+		{"https://github.com/acme/proj.git", "https://github.com/acme/proj"},
+		{"https://github.com/acme/proj/", "https://github.com/acme/proj"},
+		{"github.com/acme/proj", "https://github.com/acme/proj"},
+	}
+	for _, tt := range tests {
+		got, err := Parse(tt.in)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", tt.in, err)
+		}
+		if u := got.URL(); u != tt.want {
+			t.Errorf("Parse(%q).URL() = %q, want %q", tt.in, u, tt.want)
+		}
+	}
+	name, err := Parse("feature-123")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if u := name.URL(); u != "" {
+		t.Errorf("KindName URL() = %q, want empty", u)
+	}
+}
+
+func TestString(t *testing.T) {
+	tests := []struct {
+		t    Target
+		want string
+	}{
+		{Target{Kind: KindIssue, Owner: "axklim", Repo: "trade", Number: 59}, "axklim/trade#59"},
+		{Target{Kind: KindPR, Owner: "axklim", Repo: "trade", Number: 61}, "axklim/trade PR #61"},
+		{Target{Kind: KindRepo, Owner: "axklim", Repo: "trade"}, "axklim/trade"},
+		{Target{Kind: KindName, Name: "feature-123"}, `"feature-123"`},
+	}
+	for _, tt := range tests {
+		if got := tt.t.String(); got != tt.want {
+			t.Errorf("String() = %q, want %q", got, tt.want)
+		}
+	}
+}
+
 func TestParsePlainName(t *testing.T) {
 	got, err := Parse("feature-123")
 	if err != nil {

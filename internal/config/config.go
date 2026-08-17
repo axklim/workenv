@@ -9,15 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"workenv/internal/wtpath"
 )
 
 type Config struct {
-	// ProjectsDir is where project repositories live (and get cloned to).
-	ProjectsDir string
-	// WorktreesDir is the root under which worktrees are created, laid out
-	// as <WorktreesDir>/<project>/<name>. The deterministic layout is what
-	// makes the program stateless.
-	WorktreesDir string
+	// ProjectsPath is where project repositories live (and get cloned to).
+	ProjectsPath string
+	// WorktreePath is a template for worktree placement, rendered per environment.
+	// Defaults to wtpath.Default if not set.
+	WorktreePath string
 	// ClaudeCmd is the command started in the first tmux window.
 	ClaudeCmd string
 	// RemoteWe is the path of the we binary on remote hosts.
@@ -54,8 +55,12 @@ func Load() (Config, error) {
 }
 
 func parse(raw, home string) (Config, error) {
-	cfg := Config{ClaudeCmd: "claude", RemoteWe: "we"}
-	var projectsDir, worktreesDir string
+	cfg := Config{
+		ClaudeCmd:    "claude",
+		RemoteWe:     "we",
+		WorktreePath: wtpath.Default,
+	}
+	var projectsPath, worktreePathOverride string
 	for i, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -68,27 +73,33 @@ func parse(raw, home string) (Config, error) {
 		key = strings.TrimSpace(key)
 		val = strings.Trim(strings.TrimSpace(val), `"`)
 		switch key {
-		case "projects_dir":
-			projectsDir = val
-		case "worktrees_dir":
-			worktreesDir = val
+		case "projects_path":
+			projectsPath = val
+		case "worktree_path":
+			worktreePathOverride = val
 		case "claude_cmd":
 			cfg.ClaudeCmd = val
 		case "remote_we":
 			cfg.RemoteWe = val
+		case "projects_dir", "worktrees_dir":
+			return Config{}, fmt.Errorf("config line %d: key %q is retired (use %q instead)", i+1, key, retiredKeyMap[key])
 		default:
 			return Config{}, fmt.Errorf("config line %d: unknown key %q", i+1, key)
 		}
 	}
-	if projectsDir == "" {
-		projectsDir = filepath.Join(home, "projects")
+	if projectsPath == "" {
+		projectsPath = filepath.Join(home, "projects")
 	}
-	cfg.ProjectsDir = expandHome(projectsDir, home)
-	if worktreesDir == "" {
-		worktreesDir = filepath.Join(cfg.ProjectsDir, ".we")
+	cfg.ProjectsPath = expandHome(projectsPath, home)
+	if worktreePathOverride != "" {
+		cfg.WorktreePath = worktreePathOverride
 	}
-	cfg.WorktreesDir = expandHome(worktreesDir, home)
 	return cfg, nil
+}
+
+var retiredKeyMap = map[string]string{
+	"projects_dir":  "projects_path",
+	"worktrees_dir": "worktree_path",
 }
 
 func expandHome(p, home string) string {

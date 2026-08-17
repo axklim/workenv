@@ -1,6 +1,9 @@
 package naming
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSlugify(t *testing.T) {
 	tests := []struct {
@@ -25,28 +28,32 @@ func TestSlugify(t *testing.T) {
 
 func TestSessionName(t *testing.T) {
 	tests := []struct {
-		project, name string
-		want          string
+		project, branch string
+		want            string
 	}{
-		{"example-service", "feature-123", "we-example-service-feature-123"},
-		{"my.repo", "fix:thing", "we-my-repo-fix-thing"},
-		{"proj", "feature/login", "we-proj-feature-login"},
-		{"proj", "with spaces", "we-proj-with-spaces"},
+		{"trade", "review_claude-file", "trade-review_claude-file"},
+		{"trade", "feat/static-grid", "trade-feat-static-grid"},
+		{"my.repo", "fix:thing", "my-repo-fix-thing"},
 	}
 	for _, tt := range tests {
-		if got := SessionName(tt.project, tt.name); got != tt.want {
-			t.Errorf("SessionName(%q, %q) = %q, want %q", tt.project, tt.name, got, tt.want)
+		got := SessionName(tt.project, tt.branch)
+		if got != tt.want {
+			t.Errorf("SessionName(%q, %q) = %q, want %q", tt.project, tt.branch, got, tt.want)
+		}
+		if strings.HasPrefix(got, "we-") {
+			t.Errorf("SessionName(%q, %q) = %q, must not start with we-", tt.project, tt.branch, got)
 		}
 	}
 }
 
-func TestBranchForIssue(t *testing.T) {
+func TestBranchForIssueUsesTitleSlugWithoutPrefix(t *testing.T) {
 	tests := []struct {
 		num   int
 		title string
 		want  string
 	}{
-		{123, "Add Kafka publisher", "issue-123-add-kafka-publisher"},
+		{123, "Add Kafka publisher", "add-kafka-publisher"},
+		{59, "Review CLAUDE.md file", "review-claude-md-file"},
 		{7, "", "issue-7"},
 		{42, "!!!", "issue-42"},
 	}
@@ -70,8 +77,8 @@ func TestSanitize(t *testing.T) {
 	}
 }
 
-func TestPRName(t *testing.T) {
-	if got := PRName(456); got != "pr-456" {
-		t.Errorf("PRName(456) = %q, want %q", got, "pr-456")
+func TestPRBranch(t *testing.T) {
+	if got := PRBranch(456); got != "pr-456" {
+		t.Errorf("PRBranch(456) = %q, want %q", got, "pr-456")
 	}
 }
