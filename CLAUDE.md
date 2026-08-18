@@ -31,11 +31,16 @@ set `HOME` itself with `t.Setenv` and compare against that value.
 
 `docs/superpowers/specs/2026-08-17-workenv-design.md` specifies the state
 schema, resolution order for every target kind, naming, placement, repair,
-delete and listing semantics, plus worked use cases that read as acceptance
-criteria. Read it before changing behaviour; if code and spec disagree, the
-spec wins or the spec gets amended deliberately — not silently.
-`docs/superpowers/plans/` holds the implementation plans, as a record of how
-it was built.
+delete and listing semantics. Read it before changing behaviour; if code and
+spec disagree, the spec wins or the spec gets amended deliberately — not
+silently.
+
+It is a **snapshot of the design as implemented**, and so is
+`docs/superpowers/plans/` — a record of how it was built, not a running
+description of the tool. `docs/usecases.md` is the opposite: current
+behaviour, user-facing, and the thing to update when behaviour changes. The
+two overlap today (the use cases were copied out of the spec), which is fine —
+do not "fix" it by deleting either.
 
 ## Architecture
 
