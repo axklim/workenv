@@ -27,6 +27,28 @@ docker run --rm -v "$PWD":/src -w /src -v "$HOME/.cache/workenv-go":/cache \
 The container sets `HOME=/cache`, so a test that reads `os.UserHomeDir()` must
 set `HOME` itself with `t.Setenv` and compare against that value.
 
+## Releasing
+
+A release is a manual `workflow_dispatch` of `.github/workflows/release.yml`
+with a bare `X.Y.Z` version. It runs `make check`, cross-compiles the three
+release platforms, tags, publishes, then renders the Homebrew formula into
+`axklim/homebrew-tap` and installs it on a macOS runner to prove it works.
+
+**The formula's source of truth is `packaging/workenv.rb.tmpl` here, not
+`Formula/workenv.rb` in the tap** — the tap's copy is generated and the next
+release overwrites it. `make dist VERSION=X.Y.Z` then `make formula
+VERSION=X.Y.Z` reproduces locally exactly what the workflow pushes.
+
+The version is stamped at link time (`-ldflags -X main.version=…`), so
+releasing changes no file in the repository and cuts no commit — only a tag.
+
+The workflow always checks out and builds `main` (`ref: main` in its
+`checkout` step) regardless of what branch the dispatch was started from —
+but the workflow *file* that runs is the one on whichever ref you dispatched
+from. Dispatching from a stale branch runs old release orchestration against
+current `main` code, which can silently skip a fix made to the workflow
+itself. Dispatch from `main`.
+
 ## The design doc is the authority
 
 `docs/superpowers/specs/2026-08-17-workenv-design.md` specifies the state

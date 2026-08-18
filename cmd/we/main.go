@@ -33,6 +33,7 @@ Usage:
   we show   <target> [--host H]
   we delete <target> [--repo R] [--host H]
                      [--force] [--delete-branch] [--keep-worktree]
+  we version
 
 Aliases: ls = list; rm, down = delete
 
@@ -85,6 +86,14 @@ func run(args []string) error {
 		if len(args) == 0 {
 			return errors.New("missing command")
 		}
+		return nil
+	}
+
+	// Answered before config.Load() on purpose: a machine with an unparsable
+	// config must still be able to say which version it has, and `brew test`
+	// runs the binary in a sandbox with no config at all.
+	if args[0] == "version" || args[0] == "--version" {
+		fmt.Println(version)
 		return nil
 	}
 
