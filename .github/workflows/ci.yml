@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# ubuntu, not macos: every compiling step here runs the Go toolchain in
+# Docker, and GitHub's macOS runners have no Docker daemon.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: gofmt, vet and the test suite
+        run: make check
+
+      # Steps below exercise the release path on every pull request. Finding
+      # out at tag time that packaging is broken is the failure this prevents.
+      - name: Cross-compile and package
+        run: make dist VERSION=0.0.0-ci
+
+      - name: The packaged binary reports the stamped version
+        # Also proves the tarball is flat: a nested layout would not put `we`
+        # where this extraction looks for it.
+        run: |
+          set -euo pipefail
+          tar -xzf dist/workenv-0.0.0-ci-linux-amd64.tar.gz -C "$RUNNER_TEMP"
+          test "$("$RUNNER_TEMP/we" --version)" = "0.0.0-ci"
+
+      - name: Render and lint the formula
+        # A separate render step, not `make formula | ruby -c`: the
+        # implicit `bash -e {0}` shell for `run:` has no pipefail, so a
+        # failing `make formula` piped into anything used to exit 0. `ruby
+        # -c` also only proves the file parses; `brew style` proves it is a
+        # valid formula, which is what actually gates the release.
+        run: |
+          set -euo pipefail
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          command -v brew >/dev/null || { echo "::error::brew not found on this runner"; exit 1; }
+          # brew style is path-sensitive: the file must sit under a
+          # directory named Formula/ for the right cop configuration.
+          mkdir -p "$RUNNER_TEMP/lint/Formula"
+          make formula VERSION=0.0.0-ci > "$RUNNER_TEMP/lint/Formula/workenv.rb"
+          brew style "$RUNNER_TEMP/lint/Formula/workenv.rb"

@@ -17,25 +17,30 @@ breaks it.
 
 ## Prerequisites
 
-`git`, `gh` (authenticated), `tmux`, [Ghostty](https://ghostty.org). Building
-needs either a Go toolchain or Docker.
+`git`, `gh` (authenticated), `tmux`, [Ghostty](https://ghostty.org), and
+`claude` on your PATH. Homebrew installs `gh` and `tmux` for you; Ghostty is a
+cask and Claude Code is not a Homebrew package, so both are yours to install.
 
 ## Install
 
-With Go installed:
-
 ```
-go build -o ~/.local/bin/we ./cmd/we
+brew install axklim/tap/workenv
 ```
 
-Without it — every `make` target runs the Go toolchain in a container, so
-Docker is the only build dependency:
+macOS on Apple silicon, and Linux on amd64 or arm64 — the last of which is how
+a host reached with `--host` gets `we`.
+
+To build it instead: every `make` target runs the Go toolchain in a container,
+so Docker is the only build dependency.
 
 ```
 make build     # -> bin/we (native, cross-compiled for the host)
 make install   # -> ~/.local/bin/we
 make check     # gofmt, go vet, tests
 ```
+
+With a Go toolchain of your own, `go build -o ~/.local/bin/we ./cmd/we` also
+works — the binary then reports its version as `dev`, since nothing stamped it.
 
 `make help` lists all targets.
 
@@ -49,6 +54,7 @@ we ls     [-l] [--host H]
 we show   <target> [--host H]
 we delete <target> [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
+we version
 ```
 
 `ls` is an alias of `list`; `rm` and `down` of `delete`.

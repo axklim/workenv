@@ -1,0 +1,178 @@
+name: Release
+
+# Manual on purpose. A release is a decision, not a consequence of pushing
+# to main.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the leading v (e.g. 0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+# One release at a time: two simultaneous dispatches must not race the tag
+# push and the tap commit against each other.
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Set once here and read back as "$VERSION" in every run: block below.
+    # Splicing ${{ inputs.version }} directly into shell text lets GitHub
+    # substitute it before bash parses anything, so a version containing a
+    # `"` breaks out of quoting and runs arbitrary commands with this job's
+    # contents:write and, later, TAP_TOKEN in scope.
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate the version and refuse to reuse a tag
+        # If this trips: a formula-only problem needs no new version —
+        # re-render `make formula VERSION=X.Y.Z` in a tap checkout and push
+        # that. Anything needing a different binary means cutting the next
+        # patch version instead — deleting a published tag to reuse it is
+        # worse than superseding it.
+        run: |
+          set -euo pipefail
+          V="$VERSION"
+          echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "::error::version must be X.Y.Z, got '$V'"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/v$V" >/dev/null 2>&1; then
+            echo "::error::tag v$V already exists"; exit 1
+          fi
+
+      - name: Test before building anything
+        run: make check
+
+      - name: Cross-compile and package
+        run: make dist VERSION="$VERSION"
+
+      - name: The artifacts are complete and correctly stamped
+        run: |
+          set -euo pipefail
+          V="$VERSION"
+          test -f "dist/workenv-$V-darwin-arm64.tar.gz"
+          test -f "dist/workenv-$V-linux-amd64.tar.gz"
+          test -f "dist/workenv-$V-linux-arm64.tar.gz"
+          test -f dist/SHA256SUMS
+
+          # The checksums that end up in the formula, proven against the
+          # files actually about to be uploaded.
+          (cd dist && shasum -a 256 -c SHA256SUMS)
+
+          # Extract every platform, not just the one this runner can
+          # execute, and confirm each binary is actually built for the
+          # architecture its filename claims. The realistic failure is a
+          # cross-compile that silently produced the wrong architecture.
+          mkdir -p "$RUNNER_TEMP/darwin-arm64" "$RUNNER_TEMP/linux-amd64" "$RUNNER_TEMP/linux-arm64"
+          tar -xzf "dist/workenv-$V-darwin-arm64.tar.gz" -C "$RUNNER_TEMP/darwin-arm64"
+          tar -xzf "dist/workenv-$V-linux-amd64.tar.gz" -C "$RUNNER_TEMP/linux-amd64"
+          tar -xzf "dist/workenv-$V-linux-arm64.tar.gz" -C "$RUNNER_TEMP/linux-arm64"
+
+          file "$RUNNER_TEMP/darwin-arm64/we" | grep -q 'Mach-O.*arm64' \
+            || { echo "::error::darwin-arm64/we is not a Mach-O arm64 binary"; exit 1; }
+          file "$RUNNER_TEMP/linux-amd64/we" | grep -q 'ELF.*x86-64' \
+            || { echo "::error::linux-amd64/we is not an ELF x86-64 binary"; exit 1; }
+          file "$RUNNER_TEMP/linux-arm64/we" | grep -q 'ELF.*aarch64' \
+            || { echo "::error::linux-arm64/we is not an ELF aarch64 binary"; exit 1; }
+
+          # Only linux/amd64 can actually run on this runner.
+          test "$("$RUNNER_TEMP/linux-amd64/we" --version)" = "$V"
+
+      - name: Render and lint the formula
+        # Proves the formula Homebrew will grade with `brew audit --strict`
+        # in the verify job, before anything is public. `brew style` is
+        # path-sensitive — the file must sit under a directory named
+        # Formula/ for the right cop configuration to apply.
+        run: |
+          set -euo pipefail
+          V="$VERSION"
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          command -v brew >/dev/null || { echo "::error::brew not found on this runner"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/lint/Formula"
+          make formula VERSION="$V" > "$RUNNER_TEMP/lint/Formula/workenv.rb"
+          brew style "$RUNNER_TEMP/lint/Formula/workenv.rb"
+
+      # Nothing above this line published anything; everything below does.
+      - name: Tag it
+        # A tag and no commit: the version is stamped at link time, so a
+        # release changes no file in the repository.
+        run: |
+          set -euo pipefail
+          V="$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$V" -m "workenv $V"
+          git push origin "v$V"
+
+      - name: Publish the release
+        # Before the formula bump, not after: the formula points at these
+        # assets' URLs and checksums, so they have to exist first.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          V="$VERSION"
+          cat > notes.md <<EOF
+          ## Install
+
+          \`\`\`sh
+          brew install axklim/tap/workenv
+          \`\`\`
+
+          Installs the \`we\` binary from the prebuilt tarballs below — macOS on Apple silicon, Linux on amd64 and arm64. Homebrew pulls \`gh\` and \`tmux\`; Ghostty and \`claude\` are not Homebrew packages and are installed separately.
+
+          Checksums are in \`SHA256SUMS\`.
+          EOF
+          gh release create "v$V" dist/*.tar.gz dist/SHA256SUMS \
+            --title "workenv $V" --notes-file notes.md
+
+      - name: Render the formula into axklim/homebrew-tap
+        # GITHUB_TOKEN cannot reach another repository, so this needs
+        # TAP_TOKEN — a fine-grained PAT with contents:write on the tap.
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          V="$VERSION"
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/axklim/homebrew-tap.git" tap
+          make formula VERSION="$V" > tap/Formula/workenv.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # add, not commit -a: the first release creates this file rather
+          # than editing it, and -a ignores untracked paths.
+          git add Formula/workenv.rb
+          if git diff --quiet HEAD; then
+            echo "formula already points at v$V"
+          else
+            git commit -m "fix(workenv): bump to $V"
+            git push origin HEAD:main
+          fi
+
+  verify:
+    needs: release
+    runs-on: macos-15
+    permissions: {}
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Install through the tap exactly as a user would
+        # The real gate: the published asset, through the formula just
+        # pushed. `brew test` asserts `we --version` equals the formula's
+        # version, so a botched bump fails here.
+        run: |
+          set -euo pipefail
+          brew tap axklim/tap
+          brew trust --formula axklim/tap/workenv
+          brew install axklim/tap/workenv
+          brew test workenv
+          brew audit --strict --formula axklim/tap/workenv
+          test "$(we --version)" = "$VERSION"
