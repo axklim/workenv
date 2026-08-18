@@ -9,12 +9,11 @@ attached to it.
 we open https://github.com/axklim/trade/issues/59
 ```
 
-...finds (or clones) `trade`, checks out a worktree on the branch for the
-issue — the linked PR's branch if there is one, otherwise a slug of the issue
-title — starts a tmux session with `claude` running, and opens Ghostty
-attached to it. Run it again, or run it with the PR's URL, and it brings the
-same environment back into focus: an environment is a record, not something
-derived from names, so renaming the branch or the directory never breaks it.
+The branch comes from the issue's linked PR when there is one, otherwise from
+a slug of its title. Run it again — or run it with the PR's URL — and it
+brings the same environment back into focus: an environment is a record, not
+something derived from names, so renaming the branch or the directory never
+breaks it.
 
 ## Prerequisites
 
@@ -127,9 +126,13 @@ resolve to one environment; resolution goes registry → GitHub links → git
 worktrees. Sessions carry `@workenv` tmux user options, so `we` never adopts
 or kills a session it doesn't own.
 
+[Worked examples](docs/usecases.md) walk through a day of it: starting from an
+issue, picking the work back up from its PR, reviewing a fork's PR, renaming a
+branch mid-flight, recovering after a reboot, and tearing down.
+
 The [design doc][design] covers the rest: the state schema, resolution rules
-for every target kind, placement templates, naming, repair, and worked use
-cases. [docs/superpowers/plans/](docs/superpowers/plans/) holds the
-implementation plans it was built from.
+for every target kind, placement templates, naming and repair.
+[docs/superpowers/plans/](docs/superpowers/plans/) holds the implementation
+plans it was built from.
 
 [design]: docs/superpowers/specs/2026-08-17-workenv-design.md
