@@ -58,9 +58,9 @@ jobs:
         run: |
           set -euo pipefail
           V="$VERSION"
-          test -f "dist/workenv-$V-darwin-arm64.tar.gz"
-          test -f "dist/workenv-$V-linux-amd64.tar.gz"
-          test -f "dist/workenv-$V-linux-arm64.tar.gz"
+          test -f "dist/workenv-$V-macos-arm.tar.gz"
+          test -f "dist/workenv-$V-linux-intel.tar.gz"
+          test -f "dist/workenv-$V-linux-arm.tar.gz"
           test -f dist/SHA256SUMS
 
           # The checksums that end up in the formula, proven against the
@@ -71,34 +71,52 @@ jobs:
           # execute, and confirm each binary is actually built for the
           # architecture its filename claims. The realistic failure is a
           # cross-compile that silently produced the wrong architecture.
-          mkdir -p "$RUNNER_TEMP/darwin-arm64" "$RUNNER_TEMP/linux-amd64" "$RUNNER_TEMP/linux-arm64"
-          tar -xzf "dist/workenv-$V-darwin-arm64.tar.gz" -C "$RUNNER_TEMP/darwin-arm64"
-          tar -xzf "dist/workenv-$V-linux-amd64.tar.gz" -C "$RUNNER_TEMP/linux-amd64"
-          tar -xzf "dist/workenv-$V-linux-arm64.tar.gz" -C "$RUNNER_TEMP/linux-arm64"
+          mkdir -p "$RUNNER_TEMP/macos-arm" "$RUNNER_TEMP/linux-intel" "$RUNNER_TEMP/linux-arm"
+          tar -xzf "dist/workenv-$V-macos-arm.tar.gz" -C "$RUNNER_TEMP/macos-arm"
+          tar -xzf "dist/workenv-$V-linux-intel.tar.gz" -C "$RUNNER_TEMP/linux-intel"
+          tar -xzf "dist/workenv-$V-linux-arm.tar.gz" -C "$RUNNER_TEMP/linux-arm"
 
-          file "$RUNNER_TEMP/darwin-arm64/we" | grep -q 'Mach-O.*arm64' \
-            || { echo "::error::darwin-arm64/we is not a Mach-O arm64 binary"; exit 1; }
-          file "$RUNNER_TEMP/linux-amd64/we" | grep -q 'ELF.*x86-64' \
-            || { echo "::error::linux-amd64/we is not an ELF x86-64 binary"; exit 1; }
-          file "$RUNNER_TEMP/linux-arm64/we" | grep -q 'ELF.*aarch64' \
-            || { echo "::error::linux-arm64/we is not an ELF aarch64 binary"; exit 1; }
+          file "$RUNNER_TEMP/macos-arm/we" | grep -q 'Mach-O.*arm64' \
+            || { echo "::error::macos-arm/we is not a Mach-O arm64 binary"; exit 1; }
+          file "$RUNNER_TEMP/linux-intel/we" | grep -q 'ELF.*x86-64' \
+            || { echo "::error::linux-intel/we is not an ELF x86-64 binary"; exit 1; }
+          file "$RUNNER_TEMP/linux-arm/we" | grep -q 'ELF.*aarch64' \
+            || { echo "::error::linux-arm/we is not an ELF aarch64 binary"; exit 1; }
 
           # Only linux/amd64 can actually run on this runner.
-          test "$("$RUNNER_TEMP/linux-amd64/we" --version)" = "$V"
+          test "$("$RUNNER_TEMP/linux-intel/we" --version)" = "$V"
 
-      - name: Render and lint the formula
-        # Proves the formula Homebrew will grade with `brew audit --strict`
-        # in the verify job, before anything is public. `brew style` is
-        # path-sensitive — the file must sit under a directory named
-        # Formula/ for the right cop configuration to apply.
+      - name: Render, lint and audit the formula
+        # Everything the verify job grades, run here where failing is free —
+        # the verify job only reaches `brew audit` once the tag, the release
+        # and the tap commit are already public. Rendered into a scratch tap
+        # because brew style is path-sensitive (the file must sit under a
+        # Formula/ directory) and because audit and info both need to
+        # resolve the formula by name.
         run: |
           set -euo pipefail
           V="$VERSION"
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           command -v brew >/dev/null || { echo "::error::brew not found on this runner"; exit 1; }
-          mkdir -p "$RUNNER_TEMP/lint/Formula"
-          make formula VERSION="$V" > "$RUNNER_TEMP/lint/Formula/workenv.rb"
-          brew style "$RUNNER_TEMP/lint/Formula/workenv.rb"
+          TAP="$(brew --repository)/Library/Taps/local/homebrew-pretap"
+          rm -rf "$TAP"; mkdir -p "$TAP/Formula"
+          make formula VERSION="$V" > "$TAP/Formula/workenv.rb"
+          brew style "$TAP/Formula/workenv.rb"
+          brew audit --strict --formula local/pretap/workenv
+
+          # The check whose absence published a formula reporting its
+          # version as "64": style, audit and ruby -c all pass on a formula
+          # whose version Homebrew resolves to garbage, because the version
+          # is scanned from the URL rather than stated. Only asking brew
+          # what it actually resolved catches it — and it must match the
+          # version whose assets were just built.
+          resolved="$(brew info --json=v2 --formula local/pretap/workenv \
+            | jq -r '.formulae[0].versions.stable')"
+          test "$resolved" = "$V" || {
+            echo "::error::formula resolves to version '$resolved', expected '$V'"
+            exit 1
+          }
+          rm -rf "$TAP"
 
       # Nothing above this line published anything; everything below does.
       - name: Tag it
