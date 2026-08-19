@@ -22,15 +22,15 @@ jobs:
       # Steps below exercise the release path on every pull request. Finding
       # out at tag time that packaging is broken is the failure this prevents.
       - name: Cross-compile and package
-        run: make dist VERSION=0.0.0-ci
+        run: make dist VERSION=9.9.9
 
       - name: The packaged binary reports the stamped version
         # Also proves the tarball is flat: a nested layout would not put `we`
         # where this extraction looks for it.
         run: |
           set -euo pipefail
-          tar -xzf dist/workenv-0.0.0-ci-linux-amd64.tar.gz -C "$RUNNER_TEMP"
-          test "$("$RUNNER_TEMP/we" --version)" = "0.0.0-ci"
+          tar -xzf dist/workenv-9.9.9-linux-intel.tar.gz -C "$RUNNER_TEMP"
+          test "$("$RUNNER_TEMP/we" --version)" = "9.9.9"
 
       - name: Render and lint the formula
         # A separate render step, not `make formula | ruby -c`: the
@@ -42,8 +42,26 @@ jobs:
           set -euo pipefail
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           command -v brew >/dev/null || { echo "::error::brew not found on this runner"; exit 1; }
-          # brew style is path-sensitive: the file must sit under a
-          # directory named Formula/ for the right cop configuration.
-          mkdir -p "$RUNNER_TEMP/lint/Formula"
-          make formula VERSION=0.0.0-ci > "$RUNNER_TEMP/lint/Formula/workenv.rb"
-          brew style "$RUNNER_TEMP/lint/Formula/workenv.rb"
+          # Rendered into a scratch tap, not just any directory: brew style
+          # is path-sensitive (the file must sit under a Formula/ directory
+          # for the right cop configuration), and a tap is also what lets
+          # brew resolve the formula by name for the version check below.
+          TAP="$(brew --repository)/Library/Taps/local/homebrew-citap"
+          mkdir -p "$TAP/Formula"
+          make formula VERSION=9.9.9 > "$TAP/Formula/workenv.rb"
+          brew style "$TAP/Formula/workenv.rb"
+
+          # The check that matters, and the one whose absence shipped a
+          # v0.1.1 formula reporting its version as "64": brew style, brew
+          # audit and ruby -c all pass on a formula whose version Homebrew
+          # resolves to garbage. Only asking brew what it actually resolved
+          # catches it.
+          # 9.9.9 rather than a marker like 0.0.0-ci: Homebrew's scan strips
+          # a non-numeric suffix, so 0.0.0-ci resolves to 0.0.0 and this
+          # check would fail on its own placeholder.
+          resolved="$(brew info --json=v2 --formula local/citap/workenv \
+            | jq -r '.formulae[0].versions.stable')"
+          test "$resolved" = "9.9.9" || {
+            echo "::error::formula resolves to version '$resolved', expected 9.9.9"
+            exit 1
+          }

@@ -4,9 +4,12 @@
 class Workenv < Formula
   desc "Open a task's git worktree, tmux session and terminal in one command"
   homepage "https://github.com/axklim/workenv"
-  # No explicit version: Homebrew derives it from the release asset's
-  # filename below, and stating it too is redundant enough that
-  # `brew audit --strict` rejects it.
+  # No explicit version, and the asset names below are why it is safe to
+  # leave out. Homebrew scans the version from the URL and `brew audit`
+  # rejects stating it as well; but an `…-arm64.tar.gz` suffix gave the scan
+  # a bare "64" to find, which is how a v0.1.1 formula shipped reporting its
+  # version as "64". The platform labels carry no digits, so the version is
+  # the only number in the name and the scan cannot pick the wrong one.
   license "MIT"
 
   depends_on "gh"
@@ -17,18 +20,18 @@ class Workenv < Formula
     depends_on arch: :arm64
 
     on_arm do
-      url "https://github.com/axklim/workenv/releases/download/v@VERSION@/workenv-@VERSION@-darwin-arm64.tar.gz"
+      url "https://github.com/axklim/workenv/releases/download/v@VERSION@/workenv-@VERSION@-macos-arm.tar.gz"
       sha256 "@SHA_DARWIN_ARM64@"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/axklim/workenv/releases/download/v@VERSION@/workenv-@VERSION@-linux-amd64.tar.gz"
+      url "https://github.com/axklim/workenv/releases/download/v@VERSION@/workenv-@VERSION@-linux-intel.tar.gz"
       sha256 "@SHA_LINUX_AMD64@"
     end
     on_arm do
-      url "https://github.com/axklim/workenv/releases/download/v@VERSION@/workenv-@VERSION@-linux-arm64.tar.gz"
+      url "https://github.com/axklim/workenv/releases/download/v@VERSION@/workenv-@VERSION@-linux-arm.tar.gz"
       sha256 "@SHA_LINUX_ARM64@"
     end
   end

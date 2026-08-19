@@ -27,8 +27,15 @@ LDFLAGS      = -s -w -X main.version=$(VERSION)
 
 # Release targets. darwin/amd64 is deliberately absent: it cannot be tested
 # here, and a support claim with nothing behind it is worse than none.
+#
+# Each entry is GOOS/GOARCH:LABEL. The label is what appears in the asset
+# name, and it carries no digits on purpose: Homebrew scans the version out
+# of the URL, and an `arm64` suffix gave it a bare "64" to find instead —
+# which shipped a formula whose version was "64". Keeping digits out of the
+# label leaves the version the only number in the name, so the scan cannot
+# pick the wrong one and the formula needs no explicit version line.
 DIST_DIR       ?= dist
-DIST_PLATFORMS  = darwin/arm64 linux/amd64 linux/arm64
+DIST_PLATFORMS  = darwin/arm64:macos-arm linux/amd64:linux-intel linux/arm64:linux-arm
 
 # The container runs as the invoking user so build artifacts and caches come
 # out owned by that user rather than root. GOFLAGS disables VCS stamping,
@@ -83,16 +90,17 @@ dist: | $(CACHE_DIR) ## Cross-compile and package release tarballs into dist/
 	@rm -rf "$(DIST_DIR)"
 	@mkdir -p "$(DIST_DIR)"
 	@for p in $(DIST_PLATFORMS); do \
-		os=$${p%/*}; arch=$${p#*/}; \
-		stage="$(DIST_DIR)/$$os-$$arch"; \
+		goos=$${p%%/*}; rest=$${p#*/}; \
+		goarch=$${rest%%:*}; label=$${rest#*:}; \
+		stage="$(DIST_DIR)/$$label"; \
 		mkdir -p "$$stage" || exit 1; \
-		$(DOCKER_RUN) -e GOOS=$$os -e GOARCH=$$arch $(GO_IMAGE) \
+		$(DOCKER_RUN) -e GOOS=$$goos -e GOARCH=$$goarch $(GO_IMAGE) \
 			go build -trimpath -ldflags '$(LDFLAGS)' -o "$$stage/we" ./cmd/we || exit 1; \
 		cp LICENSE README.md "$$stage/" || exit 1; \
-		tar -czf "$(DIST_DIR)/workenv-$(VERSION)-$$os-$$arch.tar.gz" \
+		tar -czf "$(DIST_DIR)/workenv-$(VERSION)-$$label.tar.gz" \
 			-C "$$stage" we LICENSE README.md || exit 1; \
 		rm -rf "$$stage"; \
-		echo "packaged workenv-$(VERSION)-$$os-$$arch.tar.gz"; \
+		echo "packaged workenv-$(VERSION)-$$label.tar.gz"; \
 	done
 	@cd "$(DIST_DIR)" && shasum -a 256 *.tar.gz > SHA256SUMS
 	@cat "$(DIST_DIR)/SHA256SUMS"
@@ -106,9 +114,9 @@ formula: ## Render the Homebrew formula from dist/SHA256SUMS to stdout
 # literal @SHA_...@ text left in the output to catch, not silent emptiness.
 	@out=$$(sed \
 		-e "s|@VERSION@|$(VERSION)|g" \
-		-e "s|@SHA_DARWIN_ARM64@|$$(awk -v f="workenv-$(VERSION)-darwin-arm64.tar.gz" '$$2==f{print $$1;found=1}END{if(!found)print "@SHA_DARWIN_ARM64@"}' "$(DIST_DIR)/SHA256SUMS")|g" \
-		-e "s|@SHA_LINUX_AMD64@|$$(awk -v f="workenv-$(VERSION)-linux-amd64.tar.gz" '$$2==f{print $$1;found=1}END{if(!found)print "@SHA_LINUX_AMD64@"}' "$(DIST_DIR)/SHA256SUMS")|g" \
-		-e "s|@SHA_LINUX_ARM64@|$$(awk -v f="workenv-$(VERSION)-linux-arm64.tar.gz" '$$2==f{print $$1;found=1}END{if(!found)print "@SHA_LINUX_ARM64@"}' "$(DIST_DIR)/SHA256SUMS")|g" \
+		-e "s|@SHA_DARWIN_ARM64@|$$(awk -v f="workenv-$(VERSION)-macos-arm.tar.gz" '$$2==f{print $$1;found=1}END{if(!found)print "@SHA_DARWIN_ARM64@"}' "$(DIST_DIR)/SHA256SUMS")|g" \
+		-e "s|@SHA_LINUX_AMD64@|$$(awk -v f="workenv-$(VERSION)-linux-intel.tar.gz" '$$2==f{print $$1;found=1}END{if(!found)print "@SHA_LINUX_AMD64@"}' "$(DIST_DIR)/SHA256SUMS")|g" \
+		-e "s|@SHA_LINUX_ARM64@|$$(awk -v f="workenv-$(VERSION)-linux-arm.tar.gz" '$$2==f{print $$1;found=1}END{if(!found)print "@SHA_LINUX_ARM64@"}' "$(DIST_DIR)/SHA256SUMS")|g" \
 		packaging/workenv.rb.tmpl); \
 	case "$$out" in \
 		*@VERSION@*|*@SHA_*) \

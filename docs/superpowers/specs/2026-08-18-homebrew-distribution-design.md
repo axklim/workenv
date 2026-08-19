@@ -80,7 +80,7 @@ The Makefile gains a version, linker flags and a platform list:
 ```make
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 LDFLAGS  = -s -w -X main.version=$(VERSION)
-DIST_PLATFORMS = darwin/arm64 linux/amd64 linux/arm64
+DIST_PLATFORMS = darwin/arm64:macos-arm linux/amd64:linux-intel linux/arm64:linux-arm
 ```
 
 `build` passes `-ldflags '$(LDFLAGS)'`, so a local `make build` already
@@ -98,9 +98,17 @@ Two new targets:
 
 **`make dist VERSION=0.1.0`** cross-compiles each entry of `DIST_PLATFORMS`
 in the pinned container and packages each as a flat
-`dist/workenv-0.1.0-<os>-<arch>.tar.gz` containing `we`, `LICENSE` and
+`dist/workenv-0.1.0-<label>.tar.gz` containing `we`, `LICENSE` and
 `README.md`, then writes `dist/SHA256SUMS` over the tarballs with
 `shasum -a 256` (present on both macOS and the Linux runner).
+
+**The platform label carries no digits.** Homebrew scans a formula's version out
+of its URL and `brew audit` rejects stating it as well — but a `-arm64` suffix
+gave that scan a bare `64` to find, and what it picks varies by Homebrew
+version: it read the real version locally and the arch suffix on the runner,
+which published a v0.1.1 formula whose version was `64`. `macos-arm`,
+`linux-intel` and `linux-arm` leave the version as the only number in the name,
+so the scan cannot pick the wrong one.
 
 Flat on purpose: Homebrew strips a single top-level directory when unpacking,
 and a tarball with three entries at the top has none to strip, so
@@ -139,18 +147,18 @@ class Workenv < Formula
     depends_on arch: :arm64
 
     on_arm do
-      url "https://github.com/axklim/workenv/releases/download/v0.1.0/workenv-0.1.0-darwin-arm64.tar.gz"
+      url "https://github.com/axklim/workenv/releases/download/v0.1.0/workenv-0.1.0-macos-arm.tar.gz"
       sha256 "…"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/axklim/workenv/releases/download/v0.1.0/workenv-0.1.0-linux-amd64.tar.gz"
+      url "https://github.com/axklim/workenv/releases/download/v0.1.0/workenv-0.1.0-linux-intel.tar.gz"
       sha256 "…"
     end
     on_arm do
-      url "https://github.com/axklim/workenv/releases/download/v0.1.0/workenv-0.1.0-linux-arm64.tar.gz"
+      url "https://github.com/axklim/workenv/releases/download/v0.1.0/workenv-0.1.0-linux-arm.tar.gz"
       sha256 "…"
     end
   end
