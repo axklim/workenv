@@ -103,7 +103,7 @@ func TestRunPathPrintsBarePath(t *testing.T) {
 	if err := os.MkdirAll(wt, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	env := seedOneEnv(t, dir, wt)
+	env, fake := seedOneEnv(t, dir, wt)
 
 	out, errOut := captureOutput(t, func() {
 		if err := runPath(env, []string{"proj-x"}); err != nil {
@@ -117,7 +117,7 @@ func TestRunPathPrintsBarePath(t *testing.T) {
 		t.Errorf("stderr = %q, want it empty", errOut)
 	}
 	// A location is a registry read: no git, no tmux, nothing spawned.
-	if fake, ok := env.R.(*execx.Fake); ok && len(fake.Calls) != 0 {
+	if len(fake.Calls) != 0 {
 		t.Errorf("path ran commands: %v", fake.Joined())
 	}
 }
@@ -129,7 +129,7 @@ func TestRunPathPrintsBarePath(t *testing.T) {
 func TestRunPathMissingWorktreeKeepsStdoutClean(t *testing.T) {
 	dir := t.TempDir()
 	wt := filepath.Join(dir, "proj.gone")
-	env := seedOneEnv(t, dir, wt)
+	env, _ := seedOneEnv(t, dir, wt)
 
 	out, errOut := captureOutput(t, func() {
 		if err := runPath(env, []string{"proj-x"}); err != nil {
@@ -169,9 +169,10 @@ func TestRunPathRemoteStreamsSSHOutput(t *testing.T) {
 }
 
 // seedOneEnv writes a registry under dir holding a single environment
-// ("proj-x", worktree wt) and returns an Env reading it over a fake runner,
-// so anything the lookup did spawn is recorded rather than run.
-func seedOneEnv(t *testing.T, dir, wt string) *we.Env {
+// ("proj-x", worktree wt) and returns an Env reading it plus the fake
+// runner behind it, so a caller can assert on what the lookup spawned
+// without having to type-assert its way back to the fake.
+func seedOneEnv(t *testing.T, dir, wt string) (*we.Env, *execx.Fake) {
 	t.Helper()
 	statePath := filepath.Join(dir, "envs.json")
 	st := &state.Store{Path: statePath}
@@ -179,7 +180,8 @@ func seedOneEnv(t *testing.T, dir, wt string) *we.Env {
 	if err := st.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	return &we.Env{Cfg: config.Config{}, R: &execx.Fake{}, StatePath: statePath, Cwd: dir}
+	fake := &execx.Fake{}
+	return &we.Env{Cfg: config.Config{}, R: fake, StatePath: statePath, Cwd: dir}, fake
 }
 
 // captureStdout redirects os.Stdout for the duration of fn and returns
