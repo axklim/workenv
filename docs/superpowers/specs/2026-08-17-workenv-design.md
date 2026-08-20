@@ -4,7 +4,9 @@ Supersedes the 2026-08-16 revision of this document (see git history). It
 covers the whole tool, not just the delta: identity, state, naming,
 placement, resolution and commands.
 
-Resolves [issue #3](https://github.com/axklim/workenv/issues/3).
+Resolves [issue #3](https://github.com/axklim/workenv/issues/3). The `path`
+command came later, for
+[issue #5](https://github.com/axklim/workenv/issues/5).
 
 ## What `we` is
 
@@ -258,6 +260,7 @@ we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--host H]
 we show   <target> [--host H]
+we path   <target> [--repo R] [--host H]
 we delete <target> [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
 ```
@@ -301,6 +304,22 @@ pruned), optionally deletes the branch, and drops the record.
 is not in the registry but names a live `@workenv`-tagged session gets that
 session killed.
 
+**path** answers where an environment is, for a caller rather than a reader:
+its worktree path on stdout, that line alone, absolute and not
+`~`-abbreviated — a quoted `~/...` is not expanded by the shell, and the
+point of the command is `cd "$(we path 7)"`. It resolves through the
+registry like show and delete, touches neither git nor tmux, and creates and
+repairs nothing. A worktree whose directory is gone still reports its
+recorded path — that is where the environment is, and the next `open`
+recreates it there — with the warning on stderr so stdout stays exactly one
+path.
+
+The output stops at the path deliberately. Composing it with the host is a
+line of shell (`zed "ssh://$host$(we path 7 --host $host)"`), while an
+editor-shaped output would bake one editor's remote-URL spelling into `we` —
+Zed's `ssh://host/path` is not VS Code's — and be useless to the `cd` and
+the scripts that want the same lookup.
+
 ## Listing
 
 ```
@@ -328,7 +347,8 @@ ID  PROJECT  SESSION                                       STATE     REFS
 `--host devbox` runs the same command over ssh with `--no-terminal` and the
 creation overrides passed through, parses the `WE_SESSION=` marker, and opens
 a local Ghostty running `ssh -t devbox tmux attach-session -t <session>`.
-`ls`, `show` and `delete` pass through unchanged. The remote host needs `we`
+`ls`, `show`, `path` and `delete` pass through unchanged — `we path 7 --host
+devbox` reports the path as it exists on devbox. The remote host needs `we`
 installed; its path is `remote_we`.
 
 ## Configuration
@@ -358,11 +378,14 @@ runner, asserting exact argv and the persisted registry:
   environment; adoption of an existing worktree; refusal to adopt an untagged
   session; repair of a missing worktree and session; branch drift; placement
   (default template, a custom `worktree_path`, `--wt` name and path);
-  delete semantics.
+  delete semantics; `path` reporting the recorded worktree and whether its
+  directory is still there.
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails
   to parse or render.
-- **cmd** — listing layout, TTY vs piped rendering, `show`.
+- **cmd** — listing layout, TTY vs piped rendering, `show`, and `path`'s
+  bare-path output (stdout carries the path alone, a missing worktree's
+  warning goes to stderr, `--host` streams the remote lookup).
 
 ## Use cases
 

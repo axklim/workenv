@@ -1188,3 +1188,50 @@ func TestShowAndDeleteRepoURLGiveHelpfulError(t *testing.T) {
 		t.Fatalf("Delete: expected an error containing %q, got %v", want, err)
 	}
 }
+
+// TestPathReportsRecordedWorktree covers what `we path` answers with: the
+// recorded worktree path for an environment the registry knows, whether
+// that directory is currently there, and an error for a target it does not
+// know — path resolves like Show and Delete and never creates anything.
+// The existence flag is separate from the path on purpose: a worktree that
+// has been deleted behind your back is still recorded at that location,
+// and the next open recreates it there.
+func TestPathReportsRecordedWorktree(t *testing.T) {
+	fake := &execx.Fake{}
+	env, repo := newTestEnv(t, fake)
+	live := mkdir(t, filepath.Join(env.Cwd, "wt"))
+	gone := filepath.Join(env.Cwd, "vanished")
+	seed(t, env,
+		&state.Env{
+			Project: "proj", Branch: "x", TmuxSession: "proj-x", WorktreePath: live, RepoPath: repo,
+			Issues: []string{"https://github.com/acme/proj/issues/59"},
+		},
+		&state.Env{Project: "proj", Branch: "y", TmuxSession: "proj-y", WorktreePath: gone, RepoPath: repo},
+	)
+
+	path, exists, err := env.Path(issue(59), "")
+	if err != nil {
+		t.Fatalf("Path(issue): %v", err)
+	}
+	if path != live || !exists {
+		t.Errorf("Path(issue) = %q, exists %v; want %q, true", path, exists, live)
+	}
+
+	path, exists, err = env.Path(name("proj-y"), "")
+	if err != nil {
+		t.Fatalf("Path(session): %v", err)
+	}
+	if path != gone || exists {
+		t.Errorf("Path(session) = %q, exists %v; want %q, false", path, exists, gone)
+	}
+
+	if _, _, err := env.Path(name("nope"), "proj"); err == nil {
+		t.Error("expected an error for a target the registry does not hold")
+	}
+
+	// Nothing about a location needs tmux, and asking for one must not
+	// start a session, tag one or even list them.
+	if hasCall(fake, "tmux") {
+		t.Errorf("Path ran tmux: %v", fake.Joined())
+	}
+}

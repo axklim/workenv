@@ -52,6 +52,7 @@ we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--host H]
 we show   <target> [--host H]
+we path   <target> [--repo R] [--host H]
 we delete <target> [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
 we version
@@ -101,6 +102,19 @@ the environment you're standing in; refs are clickable on a terminal. `-l` and
 `--host devbox` runs the command on a remote host over ssh and attaches to it
 locally. The host needs `we` installed (`remote_we`), and each host keeps its
 own registry — so an id on one means nothing on the other.
+
+`we path <target>` prints one environment's worktree path and nothing else —
+absolute, one line, no `~` — for callers that want the location rather than a
+listing to read. That is the whole interface: what to do with the path is the
+caller's business.
+
+```sh
+cd "$(we path 7)"
+
+# open an environment on another machine in Zed
+zedwe() { zed "ssh://$2$(we path "$1" --host "$2")"; }
+zedwe 7 devbox
+```
 
 ## Configuration
 

@@ -93,18 +93,131 @@ func TestRunDeletePrintsResolvedID(t *testing.T) {
 	}
 }
 
+// TestRunPathPrintsBarePath pins the whole contract `cd "$(we path 7)"`
+// rests on: stdout is the absolute worktree path and nothing else — no
+// label, no ~ abbreviation (the shell does not expand a quoted one), one
+// trailing newline — and stderr is silent when the directory is there.
+func TestRunPathPrintsBarePath(t *testing.T) {
+	dir := t.TempDir()
+	wt := filepath.Join(dir, "proj.x")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	env := seedOneEnv(t, dir, wt)
+
+	out, errOut := captureOutput(t, func() {
+		if err := runPath(env, []string{"proj-x"}); err != nil {
+			t.Fatalf("runPath: %v", err)
+		}
+	})
+	if out != wt+"\n" {
+		t.Errorf("stdout = %q, want %q", out, wt+"\n")
+	}
+	if errOut != "" {
+		t.Errorf("stderr = %q, want it empty", errOut)
+	}
+	// A location is a registry read: no git, no tmux, nothing spawned.
+	if fake, ok := env.R.(*execx.Fake); ok && len(fake.Calls) != 0 {
+		t.Errorf("path ran commands: %v", fake.Joined())
+	}
+}
+
+// TestRunPathMissingWorktreeKeepsStdoutClean covers the case `we ls` marks
+// "(missing)": the recorded location is still the answer, so it is still
+// the only thing on stdout, and the warning about the directory being gone
+// goes to stderr where a command substitution will not pick it up.
+func TestRunPathMissingWorktreeKeepsStdoutClean(t *testing.T) {
+	dir := t.TempDir()
+	wt := filepath.Join(dir, "proj.gone")
+	env := seedOneEnv(t, dir, wt)
+
+	out, errOut := captureOutput(t, func() {
+		if err := runPath(env, []string{"proj-x"}); err != nil {
+			t.Fatalf("runPath: %v", err)
+		}
+	})
+	if out != wt+"\n" {
+		t.Errorf("stdout = %q, want %q", out, wt+"\n")
+	}
+	if !strings.Contains(errOut, "does not exist") {
+		t.Errorf("stderr = %q, want it to report the missing directory", errOut)
+	}
+}
+
+// TestRunPathRemoteStreamsSSHOutput checks --host asks the host that owns
+// the environment, passing --repo through, and streams the answer rather
+// than capturing it: the remote path is the payload, so Run's stdout is
+// already exactly what a local lookup would have printed.
+func TestRunPathRemoteStreamsSSHOutput(t *testing.T) {
+	fake := &execx.Fake{}
+	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
+
+	if err := runPath(env, []string{"7", "--host", "devbox", "--repo", "trade"}); err != nil {
+		t.Fatalf("runPath: %v", err)
+	}
+	if len(fake.Calls) != 1 {
+		t.Fatalf("expected 1 recorded call, got %d: %+v", len(fake.Calls), fake.Calls)
+	}
+	call := fake.Calls[0]
+	if call.Method != "Run" {
+		t.Errorf("Method = %q, want %q (the remote stdout is the output)", call.Method, "Run")
+	}
+	want := "ssh devbox we path 7 --repo trade"
+	if got := strings.Join(call.Argv, " "); got != want {
+		t.Errorf("argv = %q, want %q", got, want)
+	}
+}
+
+// seedOneEnv writes a registry under dir holding a single environment
+// ("proj-x", worktree wt) and returns an Env reading it over a fake runner,
+// so anything the lookup did spawn is recorded rather than run.
+func seedOneEnv(t *testing.T, dir, wt string) *we.Env {
+	t.Helper()
+	statePath := filepath.Join(dir, "envs.json")
+	st := &state.Store{Path: statePath}
+	st.Add(&state.Env{Project: "proj", Branch: "x", TmuxSession: "proj-x", WorktreePath: wt, RepoPath: dir})
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return &we.Env{Cfg: config.Config{}, R: &execx.Fake{}, StatePath: statePath, Cwd: dir}
+}
+
 // captureStdout redirects os.Stdout for the duration of fn and returns
 // everything written to it.
 func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	out, _ := captureOutput(t, fn)
+	return out
+}
+
+// captureOutput redirects both streams for the duration of fn and returns
+// what each received, for the commands that deliberately split their
+// output across the two.
+func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
+	t.Helper()
+	outR, outW := pipe(t)
+	errR, errW := pipe(t)
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outW, errW
+	fn()
+	os.Stdout, os.Stderr = origOut, origErr
+	return drain(t, outW, outR), drain(t, errW, errR)
+}
+
+func pipe(t *testing.T) (*os.File, *os.File) {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("Pipe: %v", err)
 	}
-	orig := os.Stdout
-	os.Stdout = w
-	fn()
-	os.Stdout = orig
+	return r, w
+}
+
+// drain closes the write end — nothing more is coming — and reads what is
+// left in the pipe. Both captured streams here are a handful of lines,
+// well under the pipe buffer, so reading after the fact cannot deadlock.
+func drain(t *testing.T, w, r *os.File) string {
+	t.Helper()
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

@@ -6,12 +6,13 @@ Worked examples, in the order a day tends to go. Paths assume
 
 - [Starting work](#starting-work) — from an issue, its PR, a fork's PR, a bare
   repository, or nothing at all
-- [Coming back](#coming-back) — finding an environment again, and renaming its
-  branch
+- [Coming back](#coming-back) — finding an environment again, jumping into it
+  from a shell, and renaming its branch
 - [When something breaks](#when-something-breaks) — a reboot, a deleted
   worktree
 - [Placement and cleanup](#placement-and-cleanup) — one-off paths, tearing down
-- [On another machine](#on-another-machine) — `--host`
+- [On another machine](#on-another-machine) — `--host`, and opening one in an
+  editor from somewhere else
 
 ## Starting work
 
@@ -96,6 +97,19 @@ we attach https://github.com/axklim/trade/issues/59
 All four reach the same environment. `attach` never creates: a typo is an
 error, not a new branch.
 
+### Jump into an environment from a shell
+
+```
+cd "$(we path 7)"
+```
+
+`we path` prints that environment's worktree path and nothing else — absolute,
+one line, no `~` — so it can go straight into a command substitution. It takes
+the same targets as everything else (an issue URL works as well as an id),
+resolves through the registry alone, and never creates or repairs anything: an
+environment `we ls` calls `(missing)` still reports its recorded path, with the
+warning on stderr so stdout stays usable.
+
 ### Rename the branch mid-flight
 
 ```
@@ -161,3 +175,16 @@ we delete 7 --host devbox
 The environment is created on devbox and recorded in devbox's registry; the
 local Ghostty attaches to it over ssh. Ids are per host, so `7` there is not
 `7` here.
+
+### Open a remote environment in an editor
+
+```sh
+zedwe() { zed "ssh://$2$(we path "$1" --host "$2")"; }
+zedwe 7 devbox
+```
+
+`we path 7 --host devbox` asks devbox where its environment 7 lives and prints
+that path — devbox's, not this machine's. Pairing it with the host gives Zed
+the remote folder to open, with nothing typed by hand. `we` stops at the path:
+another editor spells its remote URL differently, and a `cd`, an `rsync` or a
+script wants no URL at all.

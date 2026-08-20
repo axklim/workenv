@@ -31,6 +31,7 @@ Usage:
   we attach <target> [--repo R] [--host H] [--no-terminal]
   we ls     [-l] [--host H]
   we show   <target> [--host H]
+  we path   <target> [--repo R] [--host H]
   we delete <target> [--repo R] [--host H]
                      [--force] [--delete-branch] [--keep-worktree]
   we version
@@ -58,6 +59,11 @@ ignored there.
 open and attach are one code path; attach never creates, so --branch,
 --session and --wt are rejected there rather than silently ignored. On a
 hit, open prints a note to stderr saying they were ignored.
+
+we path prints one environment's worktree path and nothing else, absolute
+and unabbreviated, so it can be used directly: cd "$(we path 7)", or a
+shell function handing the path to an editor. It resolves through the
+registry only, like show and delete.
 
 --host <host> runs the same command over ssh (creation overrides passed
 through) and, for open/attach, opens a local Ghostty attached to the
@@ -124,6 +130,8 @@ func run(args []string) error {
 		return runList(env, rest)
 	case "show":
 		return runShow(env, rest)
+	case "path":
+		return runPath(env, rest)
 	case "delete", "rm", "down":
 		return runDelete(env, rest)
 	default:
@@ -326,6 +334,53 @@ func runShow(env *we.Env, args []string) error {
 		return err
 	}
 	return renderShow(os.Stdout, it, renderOptsFromEnv())
+}
+
+// runPath prints one environment's worktree path and nothing else — the
+// machine-readable counterpart to show, so a caller can use it directly
+// instead of parsing a listing: `cd "$(we path 7)"`, or a shell function
+// that opens it in an editor over ssh.
+//
+// The path goes out absolute and unabbreviated, unlike every path the
+// human output prints: a quoted "~/projects/..." is not expanded by the
+// shell, so an abbreviated path would break the substitution it exists
+// for. A worktree whose directory is gone is still reported — the record
+// is where the environment is, and the next open recreates it there — with
+// the warning on stderr so stdout stays exactly one path.
+func runPath(env *we.Env, args []string) error {
+	fs := flag.NewFlagSet("path", flag.ContinueOnError)
+	repo := fs.String("repo", "", "repository for a plain-name/branch target")
+	host := fs.String("host", "", "look up on a remote host")
+	raw, err := parseWithArg(fs, args)
+	if err != nil {
+		return err
+	}
+	if raw == "" {
+		return errors.New("path: missing target (id, session, branch, issue/PR URL)")
+	}
+	if *host != "" {
+		// Run, not Output: the remote path is the payload, and streaming
+		// its stdout straight through is exactly what a local lookup would
+		// have printed — there is nothing here to parse or reformat.
+		remote := []string{*host, env.Cfg.RemoteWe, "path", raw}
+		if *repo != "" {
+			remote = append(remote, "--repo", *repo)
+		}
+		return env.R.Run("", "ssh", remote...)
+	}
+	tgt, err := target.Parse(raw)
+	if err != nil {
+		return err
+	}
+	path, exists, err := env.Path(tgt, *repo)
+	if err != nil {
+		return err
+	}
+	fmt.Println(path)
+	if !exists {
+		fmt.Fprintf(os.Stderr, "we: %s does not exist; `we open %s` recreates it\n", path, raw)
+	}
+	return nil
 }
 
 func runDelete(env *we.Env, args []string) error {

@@ -459,6 +459,31 @@ func (e *Env) Show(t target.Target, repo string) (Item, error) {
 	return item, nil
 }
 
+// Path reports where an environment's worktree is, for callers that want
+// the location rather than a listing to read: `cd "$(we path 7)"`, or a
+// shell function handing the path to an editor. Resolution is Show's and
+// Delete's — the registry only, no GitHub, no clone, no repair — and
+// nothing about tmux is consulted, so this stays a registry read.
+//
+// The recorded path is the answer even when its directory is gone (the
+// next open recreates it there), so the bool reports existence separately
+// rather than the path being withheld or the call failing.
+func (e *Env) Path(t target.Target, repo string) (path string, exists bool, err error) {
+	st, err := state.Load(e.StatePath)
+	if err != nil {
+		return "", false, err
+	}
+	env, err := e.lookupRegistry(st, t, repo)
+	if err != nil {
+		return "", false, err
+	}
+	if env == nil {
+		return "", false, notFoundInRegistry(t)
+	}
+	_, statErr := os.Stat(env.WorktreePath)
+	return env.WorktreePath, statErr == nil, nil
+}
+
 // List renders every registered environment with live tmux state; the
 // branch is read from the worktree when it exists (git is the truth for
 // it), exactly as open refreshes it on a hit — see the design doc's Model
