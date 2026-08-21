@@ -50,7 +50,8 @@ works — the binary then reports its version as `dev`, since nothing stamped it
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
                    [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
-we ls     [-l] [--host H]
+we ui     [--host H]
+we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
 we delete <target> [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
@@ -102,6 +103,13 @@ the environment you're standing in; refs are clickable on a terminal. `-l` and
 locally. The host needs `we` installed (`remote_we`), and each host keeps its
 own registry — so an id on one means nothing on the other.
 
+`we ui` is the same thing as a full-screen picker: it lists the environments
+(the local registry's, or a remote host's with `--host` or the `h` key),
+`enter` opens the selected one, `z` opens [Zed](https://zed.dev) in it — over
+SSH remoting for a remote host — and `n` creates a new one from anything
+`open` takes. `we ls --json` prints the listing as JSON; it's how `ui` reads
+a remote host's registry, so a remote host needs a `we` that knows it.
+
 ## Configuration
 
 XDG notation: `~/.config/workenv/config.toml` (or
@@ -111,6 +119,7 @@ XDG notation: `~/.config/workenv/config.toml` (or
 projects_path = "~/projects"   # where repositories live / get cloned
 claude_cmd    = "claude"       # command run in the first tmux window
 remote_we     = "we"           # we binary path on remote hosts
+zed_cmd       = "zed"          # Zed binary `we ui` launches
 
 # where new worktrees go — a Go text/template; variables and filters are
 # documented in the design doc

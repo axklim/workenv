@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -191,5 +192,83 @@ func TestHelpOutputContainsWeOpen(t *testing.T) {
 	})
 	if !strings.Contains(out, "we open") {
 		t.Errorf("`we help` output does not contain %q:\n%s", "we open", out)
+	}
+}
+
+// TestRunListJSONPrintsParseableItems pins `we ls --json` as a wire format:
+// a JSON array of items with the registry's snake_case field names, which
+// is what `we ui` parses back over ssh for a remote host's list.
+func TestRunListJSONPrintsParseableItems(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "envs.json")
+	st := &state.Store{Path: statePath}
+	st.Add(&state.Env{Project: "proj", Branch: "x", TmuxSession: "proj-x", WorktreePath: dir, RepoPath: dir})
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "git symbolic-ref", Out: "x"},
+	}}
+	env := &we.Env{Cfg: config.Config{}, R: fake, StatePath: statePath, Cwd: dir}
+
+	out := captureStdout(t, func() {
+		if err := runList(env, []string{"--json"}); err != nil {
+			t.Fatalf("runList: %v", err)
+		}
+	})
+	var items []we.Item
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if len(items) != 1 || items[0].ID != 1 || items[0].Session != "proj-x" {
+		t.Errorf("items = %+v", items)
+	}
+	if !strings.Contains(out, `"worktree_path"`) {
+		t.Errorf("output %s does not use snake_case field names", out)
+	}
+}
+
+// TestRunListJSONEmptyPrintsEmptyArray: an empty registry is [], not null
+// and not the human "no work environments" line — the consumer is a parser.
+func TestRunListJSONEmptyPrintsEmptyArray(t *testing.T) {
+	dir := t.TempDir()
+	env := &we.Env{Cfg: config.Config{}, R: &execx.Fake{}, StatePath: filepath.Join(dir, "envs.json"), Cwd: dir}
+
+	out := captureStdout(t, func() {
+		if err := runList(env, []string{"--json"}); err != nil {
+			t.Fatalf("runList: %v", err)
+		}
+	})
+	if strings.TrimSpace(out) != "[]" {
+		t.Errorf("output = %q, want []", out)
+	}
+}
+
+// TestRunListJSONPassesThroughToRemote: --json rides --host like -l does.
+func TestRunListJSONPassesThroughToRemote(t *testing.T) {
+	fake := &execx.Fake{}
+	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
+
+	if err := runList(env, []string{"--host", "devbox", "--json"}); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	want := "ssh devbox we ls --json"
+	if len(fake.Calls) != 1 || strings.Join(fake.Calls[0].Argv, " ") != want {
+		t.Fatalf("calls = %v, want exactly [%s]", fake.Joined(), want)
+	}
+}
+
+// TestUICommandRefusesWithoutTerminal: `we ui` draws on and reads from the
+// terminal; under `go test` neither stdin nor stdout is one, so the command
+// must refuse with an error saying that rather than emitting raw escapes.
+func TestUICommandRefusesWithoutTerminal(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
+
+	err := run([]string{"ui"})
+	if err == nil || !strings.Contains(err.Error(), "terminal") {
+		t.Errorf("run(ui) = %v, want an error naming the missing terminal", err)
 	}
 }

@@ -79,15 +79,22 @@ type DeleteOptions struct {
 	KeepWorktree bool
 }
 
-// Item is one row of `we ls` / the result of `we show`.
+// Item is one row of `we ls` / the result of `we show`. The JSON names are
+// a wire format, not decoration: `we ls --json` output is parsed back by
+// `we ui` over ssh, and follows the registry's snake_case naming.
 type Item struct {
-	ID                       int
-	Project, Branch, Session string
-	SessionState             string // attached | detached | none
-	WorktreePath, RepoPath   string
-	Issues, PRs              []string
-	Exists, Current          bool
-	CreatedAt                time.Time
+	ID           int       `json:"id"`
+	Project      string    `json:"project"`
+	Branch       string    `json:"branch"`
+	Session      string    `json:"session"`
+	SessionState string    `json:"session_state"` // attached | detached | none
+	WorktreePath string    `json:"worktree_path"`
+	RepoPath     string    `json:"repo_path"`
+	Issues       []string  `json:"issues"`
+	PRs          []string  `json:"prs"`
+	Exists       bool      `json:"exists"`
+	Current      bool      `json:"current"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 func (e *Env) git() gitx.Git     { return gitx.Git{R: e.R} }
@@ -346,6 +353,17 @@ func (e *Env) openTerminal(argv ...string) error {
 // remote host.
 func (e *Env) AttachRemote(host, session string) error {
 	return e.openTerminal("ssh", "-t", host, "tmux", "attach-session", "-t", session)
+}
+
+// Zed opens the Zed editor (Cfg.ZedCmd) on a local worktree.
+func (e *Env) Zed(worktreePath string) error {
+	return e.R.Run("", e.Cfg.ZedCmd, worktreePath)
+}
+
+// ZedRemote opens Zed on a worktree on host via Zed's SSH remoting. The
+// worktree path is absolute, so host and path concatenate into the URL.
+func (e *Env) ZedRemote(host, worktreePath string) error {
+	return e.R.Run("", e.Cfg.ZedCmd, "ssh://"+host+worktreePath)
 }
 
 // Delete tears down the environment for the target: kills the tmux
