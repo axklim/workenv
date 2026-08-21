@@ -9,9 +9,11 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -29,7 +31,8 @@ Usage:
   we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
                      [--host H] [--no-terminal]
   we attach <target> [--repo R] [--host H] [--no-terminal]
-  we ls     [-l] [--host H]
+  we ui     [--host H]
+  we ls     [-l] [--json] [--host H]
   we show   <target> [--host H]
   we delete <target> [--repo R] [--host H]
                      [--force] [--delete-branch] [--keep-worktree]
@@ -64,11 +67,17 @@ through) and, for open/attach, opens a local Ghostty attached to the
 resulting session. The remote host needs we installed; its path is
 remote_we.
 
+ui is a full-screen picker over the same environments: enter opens the
+selected one, z opens Zed in it (over ssh with --host), n creates a new
+one, h switches host, q quits. ls --json prints the listing as JSON — it
+is how ui reads a remote host's registry.
+
 Config (XDG): ~/.config/workenv/config.toml
   projects_path = "~/projects"   where repositories live / get cloned
   worktree_path = "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"
   claude_cmd    = "claude"       command run in the first tmux window
   remote_we     = "we"           we binary path on remote hosts
+  zed_cmd       = "zed"          Zed binary we ui launches
 
 State (XDG): ~/.local/state/workenv/envs.json
 `
@@ -126,6 +135,8 @@ func run(args []string) error {
 		return runShow(env, rest)
 	case "delete", "rm", "down":
 		return runDelete(env, rest)
+	case "ui":
+		return runUICmd(env, rest)
 	default:
 		return fmt.Errorf("unknown command %q (see we help)", cmd)
 	}
@@ -274,9 +285,30 @@ func parseSessionMarker(out string) string {
 	return ""
 }
 
+// runUICmd wires `we ui`: it refuses to start unless both stdin and stdout
+// are terminals — the UI reads raw keys from one and draws escapes on the
+// other, neither of which makes sense against a pipe.
+func runUICmd(env *we.Env, args []string) error {
+	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
+	host := fs.String("host", "", "browse a remote host's environments")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("ui: unexpected argument %q", fs.Arg(0))
+	}
+	for _, f := range []*os.File{os.Stdin, os.Stdout} {
+		if fi, err := f.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+			return errors.New("ui: stdin and stdout must be a terminal")
+		}
+	}
+	return runUI(env, os.Stdin, os.Stdout, *host)
+}
+
 func runList(env *we.Env, args []string) error {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
 	long := fs.Bool("l", false, "print the stacked form")
+	asJSON := fs.Bool("json", false, "print a JSON array (a wire format; see we ui)")
 	host := fs.String("host", "", "list on a remote host")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -289,11 +321,17 @@ func runList(env *we.Env, args []string) error {
 		if *long {
 			remote = append(remote, "-l")
 		}
+		if *asJSON {
+			remote = append(remote, "--json")
+		}
 		return env.R.Run("", "ssh", remote...)
 	}
 	items, err := env.List()
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		return printItemsJSON(os.Stdout, items)
 	}
 	if len(items) == 0 {
 		fmt.Println("no work environments")
@@ -302,6 +340,21 @@ func runList(env *we.Env, args []string) error {
 	opts := renderOptsFromEnv()
 	opts.Long = *long
 	return renderList(os.Stdout, items, opts)
+}
+
+// printItemsJSON renders `ls --json`: a JSON array of items — [] when the
+// registry is empty, never null and never the human "no work environments"
+// line, because the consumer is a parser (we ui reading a remote registry).
+func printItemsJSON(w io.Writer, items []we.Item) error {
+	if items == nil {
+		items = []we.Item{}
+	}
+	out, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, string(out))
+	return err
 }
 
 func runShow(env *we.Env, args []string) error {

@@ -26,6 +26,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.RemoteWe != "we" {
 		t.Errorf("RemoteWe = %q, want we", cfg.RemoteWe)
 	}
+	if cfg.ZedCmd != "zed" {
+		t.Errorf("ZedCmd = %q, want zed", cfg.ZedCmd)
+	}
 }
 
 func TestParseOverrides(t *testing.T) {
@@ -36,6 +39,7 @@ projects_path = "~/src"
 worktree_path = "~/worktrees/{{ .project }}/{{ .branch | sanitize }}"
 claude_cmd = "claude --dangerously-skip-permissions"
 remote_we = "/usr/local/bin/we"
+zed_cmd = "/usr/local/bin/zed"
 `
 	cfg, err := parse(raw, home)
 	if err != nil {
@@ -52,6 +56,9 @@ remote_we = "/usr/local/bin/we"
 	}
 	if cfg.RemoteWe != "/usr/local/bin/we" {
 		t.Errorf("RemoteWe = %q", cfg.RemoteWe)
+	}
+	if cfg.ZedCmd != "/usr/local/bin/zed" {
+		t.Errorf("ZedCmd = %q", cfg.ZedCmd)
 	}
 }
 

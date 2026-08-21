@@ -1,6 +1,7 @@
 package we
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1186,5 +1187,59 @@ func TestShowAndDeleteRepoURLGiveHelpfulError(t *testing.T) {
 	}
 	if _, _, err := env.Delete(repoURL("acme", "proj"), "", DeleteOptions{}); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("Delete: expected an error containing %q, got %v", want, err)
+	}
+}
+
+// TestZedOpensLocalWorktree pins the local Zed launch to the configured
+// binary and the bare worktree path, run (not captured) like the other
+// user-facing launches.
+func TestZedOpensLocalWorktree(t *testing.T) {
+	fake := &execx.Fake{}
+	env, _ := newTestEnv(t, fake)
+	env.Cfg.ZedCmd = "zed"
+
+	if err := env.Zed("/w/proj.x"); err != nil {
+		t.Fatalf("Zed: %v", err)
+	}
+	if len(fake.Calls) != 1 {
+		t.Fatalf("calls = %v, want exactly the zed launch", fake.Joined())
+	}
+	if got := fake.Joined()[0]; got != "zed /w/proj.x" {
+		t.Errorf("argv = %q, want %q", got, "zed /w/proj.x")
+	}
+	if fake.Calls[0].Method != "Run" {
+		t.Errorf("Method = %q, want Run", fake.Calls[0].Method)
+	}
+}
+
+// TestZedRemoteUsesSSHURL pins the remote form to Zed's SSH remoting URL:
+// the worktree path is absolute, so host and path concatenate into
+// ssh://<host><path>.
+func TestZedRemoteUsesSSHURL(t *testing.T) {
+	fake := &execx.Fake{}
+	env, _ := newTestEnv(t, fake)
+	env.Cfg.ZedCmd = "zed"
+
+	if err := env.ZedRemote("devbox", "/home/u/proj.x"); err != nil {
+		t.Fatalf("ZedRemote: %v", err)
+	}
+	if got := fake.Joined()[0]; got != "zed ssh://devbox/home/u/proj.x" {
+		t.Errorf("argv = %q, want %q", got, "zed ssh://devbox/home/u/proj.x")
+	}
+}
+
+// TestItemJSONUsesRegistryNaming pins Item's JSON field names to the
+// registry's snake_case convention: `we ls --json` is parsed back by the UI
+// over ssh, so the names are a wire format, not an accident of Go naming.
+func TestItemJSONUsesRegistryNaming(t *testing.T) {
+	b, err := json.Marshal(Item{ID: 7, SessionState: "attached", WorktreePath: "/w", RepoPath: "/r"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got := string(b)
+	for _, want := range []string{`"id":7`, `"session_state":"attached"`, `"worktree_path":"/w"`, `"repo_path":"/r"`, `"created_at"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("marshalled Item %s does not contain %s", got, want)
+		}
 	}
 }

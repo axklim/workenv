@@ -89,7 +89,14 @@ Supporting packages: `state` (the JSON registry — pure data plus one file, no
 git or exec), `gitx`, `gh`, `tmuxx` (thin command wrappers), `target` (parses
 what the user typed, renders canonical reference URLs), `naming` (slugs,
 sanitizing, session names), `wtpath` (renders the `worktree_path` template),
-`config`, `execx`.
+`config`, `execx`, `term` (raw mode via stty, key decoding and size for
+`we ui`).
+
+`cmd/we/ui.go` is the `we ui` picker: interactive rendering plus dispatch
+into the flows above — every action tears the screen down and runs the same
+code path the equivalent CLI command would. Its input is an `io.Reader` and
+all its external commands (stty included) go through the Runner, so the
+whole UI is tested with scripted keystrokes against `execx.Fake`.
 
 ## Conventions
 

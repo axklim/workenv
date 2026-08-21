@@ -6,8 +6,8 @@ Worked examples, in the order a day tends to go. Paths assume
 
 - [Starting work](#starting-work) — from an issue, its PR, a fork's PR, a bare
   repository, or nothing at all
-- [Coming back](#coming-back) — finding an environment again, and renaming its
-  branch
+- [Coming back](#coming-back) — finding an environment again, picking from a
+  list, opening Zed, and renaming a branch
 - [When something breaks](#when-something-breaks) — a reboot, a deleted
   worktree
 - [Placement and cleanup](#placement-and-cleanup) — one-off paths, tearing down
@@ -95,6 +95,42 @@ we attach https://github.com/axklim/trade/issues/59
 
 All four reach the same environment. `attach` never creates: a typo is an
 error, not a new branch.
+
+### Pick from a list
+
+```
+we ui
+```
+
+The same environments as `we ls`, as a full-screen picker: `↑`/`↓` (or
+`j`/`k`) move, `enter` opens the selected one — repair, tmux, Ghostty, exactly
+like `we open` — and `q` quits. `n` creates a new environment from anything
+`open` takes (an issue/PR/repository URL, a branch name), prompting for an
+optional `--repo`.
+
+### Open Zed in an environment
+
+```
+we ui        # select, then press z
+```
+
+`z` materialises the selected environment first — the same repair `open`
+runs, so a missing worktree comes back — and then opens
+[Zed](https://zed.dev) on its worktree instead of attaching a terminal. The
+binary is the `zed_cmd` config key. For a remote host's environment (see
+below), Zed connects over its SSH remoting: `zed ssh://<host><worktree>`.
+
+### Browse another machine's environments
+
+```
+we ui --host devbox
+```
+
+The list is devbox's registry, fetched over ssh as `we ls --json`; `enter`
+opens on devbox and attaches a local Ghostty over ssh, exactly like
+`we open --host devbox`. Inside the picker `h` switches host — empty input
+returns to the local registry. The remote `we` must be new enough to know
+`ls --json`.
 
 ### Rename the branch mid-flight
 

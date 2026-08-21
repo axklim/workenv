@@ -23,6 +23,8 @@ type Config struct {
 	ClaudeCmd string
 	// RemoteWe is the path of the we binary on remote hosts.
 	RemoteWe string
+	// ZedCmd is the Zed editor binary `we ui` launches.
+	ZedCmd string
 }
 
 // Path returns the config file location following XDG notation.
@@ -58,6 +60,7 @@ func parse(raw, home string) (Config, error) {
 	cfg := Config{
 		ClaudeCmd:    "claude",
 		RemoteWe:     "we",
+		ZedCmd:       "zed",
 		WorktreePath: wtpath.Default,
 	}
 	var projectsPath, worktreePathOverride string
@@ -81,6 +84,8 @@ func parse(raw, home string) (Config, error) {
 			cfg.ClaudeCmd = val
 		case "remote_we":
 			cfg.RemoteWe = val
+		case "zed_cmd":
+			cfg.ZedCmd = val
 		case "projects_dir", "worktrees_dir":
 			return Config{}, fmt.Errorf("config line %d: key %q is retired (use %q instead)", i+1, key, retiredKeyMap[key])
 		default:

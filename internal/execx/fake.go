@@ -35,6 +35,12 @@ func (f *Fake) OutputPassStderr(dir, name string, args ...string) (string, error
 	return f.record("OutputPassStderr", dir, name, args)
 }
 
+// OutputWithStdin behaves exactly like Output for a Fake — there is no
+// terminal to attach in a test — but records the call under its own Method.
+func (f *Fake) OutputWithStdin(dir, name string, args ...string) (string, error) {
+	return f.record("OutputWithStdin", dir, name, args)
+}
+
 func (f *Fake) Run(dir, name string, args ...string) error {
 	_, err := f.record("Run", dir, name, args)
 	return err

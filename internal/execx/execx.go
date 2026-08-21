@@ -20,6 +20,11 @@ type Runner interface {
 	// diagnostics when it succeeds (Output only surfaces stderr inside the
 	// error it returns on failure).
 	OutputPassStderr(dir, name string, args ...string) (string, error)
+	// OutputWithStdin is like Output but leaves stdin attached to the
+	// caller's, for commands that must talk to the terminal while their
+	// stdout is parsed — stty reads the terminal from stdin and prints
+	// settings (-g) or dimensions (size) to stdout.
+	OutputWithStdin(dir, name string, args ...string) (string, error)
 	// Run runs the command in dir streaming output to the user's terminal.
 	Run(dir, name string, args ...string) error
 }
@@ -45,6 +50,19 @@ func (Real) OutputPassStderr(dir, name string, args ...string) (string, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (Real) OutputWithStdin(dir, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Stdin = os.Stdin
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
