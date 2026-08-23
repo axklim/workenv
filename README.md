@@ -1,4 +1,4 @@
-[![release](https://img.shields.io/github/v/release/axklim/workenv?sort=semver)](https://github.com/axklim/workenv/releases/latest)
+[![release](https://img.shields.io/github/v/release/axklim/workenv)](https://github.com/axklim/workenv/actions/workflows/release.yml)
 [![build](https://img.shields.io/github/actions/workflow/status/axklim/workenv/ci.yml?branch=main)](https://github.com/axklim/workenv/actions/workflows/ci.yml)
 
 # workenv — Smart work environment
