@@ -1,6 +1,6 @@
-# workenv — Smart work environment
-
 [![release](https://img.shields.io/github/v/release/axklim/workenv?sort=semver)](https://github.com/axklim/workenv/releases/latest)
+
+# workenv — Smart work environment
 
 `we` opens a complete work environment for a task in one command: the project
 repository (cloned if you don't have it), a git worktree on the right branch,
