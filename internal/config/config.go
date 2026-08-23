@@ -1,7 +1,7 @@
 // Package config loads workenv settings from the XDG config directory
 // ($XDG_CONFIG_HOME/workenv/config.toml, defaulting to ~/.config). Only a
-// flat key = "value" TOML subset is supported, which keeps workenv
-// dependency-free.
+// flat key = "value" TOML subset is supported, which is enough for every
+// setting we has and needs no TOML library.
 package config
 
 import (

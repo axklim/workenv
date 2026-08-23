@@ -13,6 +13,91 @@ import (
 	"workenv/internal/we"
 )
 
+// parse runs args through the real parser and returns the filled options
+// and the active command's canonical name.
+func parse(t *testing.T, args ...string) (options, string) {
+	t.Helper()
+	var opts options
+	p := newParser(&opts)
+	if _, err := p.ParseArgs(args); err != nil {
+		t.Fatalf("ParseArgs(%q): %v", args, err)
+	}
+	if p.Active == nil {
+		t.Fatalf("ParseArgs(%q): no active command", args)
+	}
+	return opts, p.Active.Name
+}
+
+// TestParseAcceptsFlagsAroundTarget covers what the hand-rolled
+// parseWithArg used to do: flags are allowed before and after the
+// positional target. It also proves the embedded option structs
+// (hostOpt/repoOpt/targetArg inside attachCmd, attachCmd and overrides
+// inside openCmd) are actually reached by go-flags' reflection — a silent
+// wiring failure there would leave every flag at its zero value.
+func TestParseAcceptsFlagsAroundTarget(t *testing.T) {
+	opts, name := parse(t, "open", "--branch", "b", "7", "--wt", "/tmp/wt", "--repo", "trade", "--no-terminal")
+	if name != "open" {
+		t.Fatalf("active command = %q, want \"open\"", name)
+	}
+	o := opts.Open
+	if o.Args.Target != "7" || o.Branch != "b" || o.Wt != "/tmp/wt" || o.Repo != "trade" || !o.NoTerminal {
+		t.Errorf("open parsed as %+v", o)
+	}
+}
+
+// TestAttachRejectsCreationOverrides pins the design doc's claim that the
+// creation overrides are "rejected there rather than silently ignored":
+// attach does not define them, so passing one is a parse error.
+func TestAttachRejectsCreationOverrides(t *testing.T) {
+	for _, flag := range []string{"--branch", "--session", "--wt"} {
+		var opts options
+		_, err := newParser(&opts).ParseArgs([]string{"attach", "7", flag, "x"})
+		if err == nil {
+			t.Errorf("attach accepted %s; it must be rejected", flag)
+			continue
+		}
+		if !strings.Contains(err.Error(), strings.TrimPrefix(flag, "--")) {
+			t.Errorf("error for %s does not name the flag: %v", flag, err)
+		}
+	}
+}
+
+// TestCommandAliasesResolveToCanonicalNames guards the dispatch switch in
+// run: go-flags resolves an alias to the command it belongs to, so the
+// switch must key on the canonical name. A case on "ls" or "rm" would never
+// fire, and the command would fall through to "unknown command".
+func TestCommandAliasesResolveToCanonicalNames(t *testing.T) {
+	for _, tc := range []struct{ typed, want string }{
+		{"list", "list"}, {"ls", "list"},
+		{"delete", "delete"}, {"rm", "delete"}, {"down", "delete"},
+	} {
+		args := []string{tc.typed}
+		if tc.want == "delete" {
+			args = append(args, "7")
+		}
+		if _, name := parse(t, args...); name != tc.want {
+			t.Errorf("%q resolved to command %q, want %q", tc.typed, name, tc.want)
+		}
+	}
+}
+
+// TestHelpListsCommandsAndAliases covers what the generated help replaced:
+// the hand-written synopsis and its "Aliases: ls = list; rm, down = delete"
+// line. Every command and alias a user can type has to appear in `we help`,
+// or the only documentation of them is the source.
+func TestHelpListsCommandsAndAliases(t *testing.T) {
+	out := captureStdout(t, func() {
+		if err := run([]string{"help"}); err != nil {
+			t.Fatalf("run(help): %v", err)
+		}
+	})
+	for _, want := range []string{"open", "attach", "list", "show", "delete", "version", "aliases: ls", "rm, down"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("`we help` does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestOpenRemoteUsesOutputPassStderr guards the fix for the remote path
 // silently dropping a hit's "ignored" note: Output only surfaces stderr
 // inside the error it returns, so on a successful remote call (a hit) the
@@ -82,8 +167,10 @@ func TestRunDeletePrintsResolvedID(t *testing.T) {
 	}}
 	env := &we.Env{Cfg: config.Config{}, R: fake, StatePath: statePath, Cwd: dir}
 
+	var cmd deleteCmd
+	cmd.Args.Target = "proj-x"
 	out := captureStdout(t, func() {
-		if err := runDelete(env, []string{"proj-x"}); err != nil {
+		if err := runDelete(env, cmd); err != nil {
 			t.Fatalf("runDelete: %v", err)
 		}
 	})
