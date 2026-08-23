@@ -1,4 +1,5 @@
-[![release](https://img.shields.io/github/v/release/axklim/workenv)](https://github.com/axklim/workenv/actions/workflows/release.yml)
+[![Release](https://github.com/axklim/workenv/actions/workflows/release.yml/badge.svg)](https://github.com/axklim/workenv/actions/workflows/release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/axklim/workenv)](https://github.com/axklim/workenv/releases)
 [![build](https://img.shields.io/github/actions/workflow/status/axklim/workenv/ci.yml?branch=main)](https://github.com/axklim/workenv/actions/workflows/ci.yml)
 
 # workenv — Smart work environment
