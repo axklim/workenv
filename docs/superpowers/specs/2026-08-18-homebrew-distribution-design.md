@@ -245,7 +245,7 @@ the rendered file has to sit under a directory literally named `Formula/`
 for the right cop configuration to apply.
 
 There is no build cache. Pulling the pinned image dominates the run, and a
-cold `make check` on a module with no dependencies takes under a minute.
+cold `make check` on a module this small takes under a minute.
 
 ## Release
 
