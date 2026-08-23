@@ -309,7 +309,32 @@ func (e *Env) repairSession(env *state.Env, created bool) error {
 	if err := e.tmux().New(env.TmuxSession, env.WorktreePath, env.ID); err != nil {
 		return err
 	}
-	return e.tmux().RunInFirstWindow(env.TmuxSession, e.Cfg.ClaudeCmd)
+	return e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession))
+}
+
+// claudeCommand is what actually runs in a new session's first window:
+// claude_cmd with `--name <session>` appended, so Claude Code's own session
+// name — its prompt box, /resume picker and terminal title — reads as the
+// tmux session it lives in instead of an unrelated generated one. The name
+// is sanitized because send-keys types it into a shell: a real session name
+// passes through untouched, a hand-edited registry cannot smuggle a second
+// command in. A claude_cmd that already names the session keeps its own
+// name; appending a second --name would silently override an explicit
+// choice.
+func claudeCommand(cmd, session string) string {
+	if namesSession(cmd) {
+		return cmd
+	}
+	return cmd + " --name " + naming.Sanitize(session)
+}
+
+func namesSession(cmd string) bool {
+	for _, f := range strings.Fields(cmd) {
+		if f == "-n" || f == "--name" || strings.HasPrefix(f, "--name=") {
+			return true
+		}
+	}
+	return false
 }
 
 // showInTerminal implements the "define terminal" step: switch the current
