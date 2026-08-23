@@ -312,15 +312,6 @@ func (e *Env) repairSession(env *state.Env, created bool) error {
 	return e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession))
 }
 
-// claudeCommand is what actually runs in a new session's first window:
-// claude_cmd with `--name <session>` appended, so Claude Code's own session
-// name — its prompt box, /resume picker and terminal title — reads as the
-// tmux session it lives in instead of an unrelated generated one. The name
-// is sanitized because send-keys types it into a shell: a real session name
-// passes through untouched, a hand-edited registry cannot smuggle a second
-// command in. A claude_cmd that already names the session keeps its own
-// name; appending a second --name would silently override an explicit
-// choice.
 func claudeCommand(cmd, session string) string {
 	if namesSession(cmd) {
 		return cmd
@@ -337,10 +328,6 @@ func namesSession(cmd string) bool {
 	return false
 }
 
-// showInTerminal implements the "define terminal" step: switch the current
-// tmux client if we already runs inside tmux; focus Ghostty if some client
-// is already attached to the session; otherwise open a new Ghostty window
-// attached to it.
 func (e *Env) showInTerminal(session string) error {
 	if e.InsideTmux {
 		return e.tmux().SwitchClient(session)
@@ -373,15 +360,6 @@ func (e *Env) AttachRemote(host, session string) error {
 	return e.openTerminal("ssh", "-t", host, "tmux", "attach-session", "-t", session)
 }
 
-// Delete tears down the environment for the target: kills the tmux
-// session, removes the worktree (unless KeepWorktree) and optionally the
-// branch, and drops the record. Resolution goes through the registry only
-// — delete never queries GitHub or clones. It reports the id and tmux
-// session of what it deleted, so the caller can name the resolved
-// environment instead of echoing back whatever ambiguous target string
-// (id, session, branch, or issue/PR URL) the user happened to type. A
-// target resolved through killStray — a live tagged session with no
-// registry record — has no id; id is 0 in that case.
 func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, session string, err error) {
 	st, err := state.Load(e.StatePath)
 	if err != nil {
@@ -484,15 +462,6 @@ func (e *Env) Show(t target.Target, repo string) (Item, error) {
 	return item, nil
 }
 
-// List renders every registered environment with live tmux state; the
-// branch is read from the worktree when it exists (git is the truth for
-// it), exactly as open refreshes it on a hit — see the design doc's Model
-// section ("refreshed from the worktree whenever an environment is opened
-// or listed") and its "Rename the branch mid-flight" use case ("the
-// listing shows claude-md, and the record is updated"). Any environment
-// whose stored branch actually changed is written back in a single Save
-// once every item has been processed; nothing is saved when nothing
-// changed.
 func (e *Env) List() ([]Item, error) {
 	st, err := state.Load(e.StatePath)
 	if err != nil {

@@ -24,7 +24,8 @@ we open https://github.com/axklim/trade/issues/59
   the branch comes from the PR when there is one.
 - Every environment has a short **id** you can type: `we attach 7`.
 - Worktrees live where git users expect them, with a config override.
-- Standard library only; `git`, `gh`, `tmux`, Ghostty are the dependencies.
+- One Go dependency (`go-flags`, for the CLI surface); `git`, `gh`, `tmux`
+  and Ghostty are the runtime ones.
 
 ## Non-goals
 
@@ -153,7 +154,7 @@ layouts are one line of config — a centralised root, for instance:
 worktree_path = "~/worktrees/{{ .project }}/{{ .branch | sanitize }}"
 ```
 
-Templates are Go `text/template`, which keeps `we` on the standard library.
+Templates are Go `text/template` — no template library to depend on.
 A worktrunk template is portable in shape but not verbatim: `{{ repo }}`
 becomes `{{ .repo }}`, and `{% if %}` becomes `{{ if }}`.
 

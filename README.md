@@ -118,10 +118,6 @@ remote_we     = "we"           # we binary path on remote hosts
 worktree_path = "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"
 ```
 
-`claude` is started with `--name <tmux session>`, so the session name Claude
-Code shows — prompt box, `/resume` picker, terminal title — is the one `we ls`
-prints. Pass your own `-n`/`--name` in `claude_cmd` to override that.
-
 The default places worktrees as siblings of the repository:
 `~/projects/trade` + branch `review_claude-file` →
 `~/projects/trade.review_claude-file`. A worktree already checked out on the

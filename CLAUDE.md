@@ -67,7 +67,9 @@ do not "fix" it by deleting either.
 ## Architecture
 
 `cmd/we` parses flags and owns **all** rendering; `internal/we` owns the flows
-and is the only package that coordinates others.
+and is the only package that coordinates others. The command surface is the
+tag-annotated `options` struct in `main.go` — go-flags renders `--help` from
+it, so there is no hand-written synopsis to keep in step.
 
 The heart of it is a two-phase split in `internal/we`, worth understanding
 before editing either half:
@@ -93,8 +95,6 @@ sanitizing, session names), `wtpath` (renders the `worktree_path` template),
 
 ## Conventions
 
-- **Standard library only.** `go.mod` has no requirements and should stay that
-  way; the path template is `text/template`, not a dependency.
 - **Every external command goes through `execx.Runner`** — never `os/exec`
   directly. That is what makes the flows testable.
 - **References are canonical URLs.** `target.Target.URL()` produces what the
