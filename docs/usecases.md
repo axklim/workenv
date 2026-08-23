@@ -25,8 +25,8 @@ we open https://github.com/axklim/trade/issues/59
 is the slug `review-claude-md-file`. The repository is cloned to
 `~/projects/trade` if it is not there yet. Result: worktree
 `~/projects/trade.review-claude-md-file`, session `trade-review-claude-md-file`
-with `claude` running, a Ghostty window attached, and record id 7 holding the
-issue URL.
+with `claude` running under that same session name, a Ghostty window attached,
+and record id 7 holding the issue URL.
 
 ### Pick the work back up from its pull request
 

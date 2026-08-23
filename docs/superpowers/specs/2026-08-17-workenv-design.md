@@ -283,7 +283,10 @@ ignored, so re-running a command from shell history still attaches.
 
 - worktree directory missing → `git worktree prune`, re-add at the recorded
   path on the recorded branch;
-- tmux session missing → create, tag, start `claude_cmd` in the first window;
+- tmux session missing → create, tag, start `claude_cmd` in the first
+  window with `--name <session>` appended, so Claude Code's own session
+  name matches the tmux session (a `claude_cmd` that already passes `-n`
+  or `--name` keeps its own);
 - branch renamed inside the worktree → the stored branch is refreshed.
 
 **Adoption.** A live tmux session with the target name is reused only if it
@@ -338,7 +341,8 @@ installed; its path is `remote_we`.
 
 ```toml
 projects_path = "~/projects"   # where repositories live / get cloned
-claude_cmd    = "claude"       # command run in the first tmux window
+claude_cmd    = "claude"       # command run in the first tmux window,
+                               # with --name <session> appended
 remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go; see Placement for variables and filters

@@ -121,7 +121,7 @@ func TestOpenIssueCreatesEverything(t *testing.T) {
 		"git worktree add -b add-kafka-publisher " + wtPath + " main",
 		"tmux new-session -d -s proj-add-kafka-publisher -c " + wtPath,
 		"tmux set-option -t proj-add-kafka-publisher @workenv_id 1",
-		"tmux send-keys -t proj-add-kafka-publisher claude Enter",
+		"tmux send-keys -t proj-add-kafka-publisher claude --name proj-add-kafka-publisher Enter",
 	} {
 		if !hasCall(fake, want) {
 			t.Errorf("missing call %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
@@ -609,10 +609,48 @@ func TestOpenRecreatesMissingWorktreeAndSession(t *testing.T) {
 		"git worktree add " + gone + " feature-123", // branch already exists locally: plain add, no -b
 		"tmux new-session -d -s proj-feature-123 -c " + gone,
 		"tmux set-option -t proj-feature-123 @workenv_id " + strconv.Itoa(res.ID),
-		"tmux send-keys -t proj-feature-123 claude Enter",
+		"tmux send-keys -t proj-feature-123 claude --name proj-feature-123 Enter",
 	} {
 		if !hasCall(fake, want) {
 			t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+		}
+	}
+}
+
+// TestOpenNamesClaudeSessionAfterTmuxSession covers issue #12: claude is
+// started with --name so the session name it shows — prompt box, /resume
+// picker, terminal title — is the tmux session it runs in. The flag is
+// appended to the configured claude_cmd, after the user's own flags.
+func TestOpenNamesClaudeSessionAfterTmuxSession(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession}}
+	env, repo := newTestEnv(t, fake)
+	env.Cfg.ClaudeCmd = "claude --dangerously-skip-permissions"
+	gone := filepath.Join(env.Cwd, "gone")
+	seed(t, env, &state.Env{Project: "proj", Branch: "feature-123", TmuxSession: "proj-feature-123", WorktreePath: gone, RepoPath: repo})
+
+	if _, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true}); err != nil {
+		t.Fatalf("Open error: %v", err)
+	}
+	want := "tmux send-keys -t proj-feature-123 claude --dangerously-skip-permissions --name proj-feature-123 Enter"
+	if !slices.Contains(fake.Joined(), want) {
+		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+	}
+}
+
+// TestClaudeCommand covers the rest of the naming rule: a claude_cmd that
+// already names the session keeps its own name, and the appended name is
+// sanitized, so send-keys always types one shell word.
+func TestClaudeCommand(t *testing.T) {
+	for _, tc := range []struct{ cmd, session, want string }{
+		{"claude", "proj-feature", "claude --name proj-feature"},
+		{"claude --model opus", "proj-feature", "claude --model opus --name proj-feature"},
+		{"claude --name mine", "proj-feature", "claude --name mine"},
+		{"claude --name=mine", "proj-feature", "claude --name=mine"},
+		{"claude -n mine", "proj-feature", "claude -n mine"},
+		{"claude", "hand edited; rm -rf /", "claude --name hand-edited-rm-rf"},
+	} {
+		if got := claudeCommand(tc.cmd, tc.session); got != tc.want {
+			t.Errorf("claudeCommand(%q, %q) = %q, want %q", tc.cmd, tc.session, got, tc.want)
 		}
 	}
 }
