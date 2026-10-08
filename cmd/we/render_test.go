@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -248,6 +251,69 @@ func TestRenderListLong(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "dir:") {
 		t.Errorf("stacked form must not print the table's dir: line:\n%s", buf.String())
+	}
+}
+
+// TestRenderJSON pins `ls --json` as a wire format: exact snake_case keys,
+// absolute paths, and issues/prs as arrays even when empty.
+func TestRenderJSON(t *testing.T) {
+	t.Setenv("HOME", "/Users/u")
+	items := plainItems("/Users/u")
+	items[0].CreatedAt = time.Date(2026, 8, 16, 18, 12, 3, 0, time.UTC)
+	var buf bytes.Buffer
+	if err := renderJSON(&buf, items); err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, buf.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d objects, want 2:\n%s", len(got), buf.String())
+	}
+
+	wantKeys := []string{"branch", "created_at", "id", "issues", "project", "prs",
+		"repo_path", "session", "state", "worktree_missing", "worktree_path"}
+	for i, obj := range got {
+		var keys []string
+		for k := range obj {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		if !slices.Equal(keys, wantKeys) {
+			t.Errorf("object %d keys = %q, want %q", i, keys, wantKeys)
+		}
+	}
+
+	first := got[0]
+	want := map[string]any{
+		"id":               float64(7),
+		"project":          "trade",
+		"branch":           "review_claude-file",
+		"session":          "trade-review_claude-file",
+		"state":            "attached",
+		"worktree_path":    "/Users/u/projects/trade.review_claude-file",
+		"worktree_missing": false,
+		"repo_path":        "/Users/u/projects/trade",
+		"created_at":       "2026-08-16T18:12:03Z",
+	}
+	for k, v := range want {
+		if first[k] != v {
+			t.Errorf("%s = %v, want %v", k, first[k], v)
+		}
+	}
+	if s := fmt.Sprint(first["issues"], first["prs"]); s != "[https://github.com/axklim/trade/issues/59] [https://github.com/axklim/trade/pull/61]" {
+		t.Errorf("issues, prs = %s", s)
+	}
+
+	second := got[1]
+	if second["worktree_missing"] != true {
+		t.Errorf("second worktree_missing = %v, want true", second["worktree_missing"])
+	}
+	for _, k := range []string{"issues", "prs"} {
+		if arr, ok := second[k].([]any); !ok || len(arr) != 0 {
+			t.Errorf("second %s = %#v, want []", k, second[k])
+		}
 	}
 }
 

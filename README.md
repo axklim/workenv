@@ -53,7 +53,7 @@ works — the binary then reports its version as `dev`, since nothing stamped it
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
                    [--rc] [--prompt TEXT] [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
-we ls     [-l] [--host H]
+we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
 we delete <target> [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]

@@ -221,6 +221,35 @@ func TestRunDeletePrintsResolvedID(t *testing.T) {
 	}
 }
 
+// TestRunListJSONEmptyIsArray: an empty registry is [] under --json, not
+// the "no work environments" line, and -l does not change that.
+func TestRunListJSONEmptyIsArray(t *testing.T) {
+	dir := t.TempDir()
+	env := &we.Env{Cfg: config.Config{}, R: &execx.Fake{}, StatePath: filepath.Join(dir, "envs.json"), Cwd: dir}
+	opts, _ := parse(t, "ls", "--json", "-l")
+	out := captureStdout(t, func() {
+		if err := runList(env, opts.List); err != nil {
+			t.Fatalf("runList: %v", err)
+		}
+	})
+	if out != "[]\n" {
+		t.Errorf("output = %q, want %q", out, "[]\n")
+	}
+}
+
+// TestRunListJSONPassesThroughToRemote: --json rides --host like -l does.
+func TestRunListJSONPassesThroughToRemote(t *testing.T) {
+	fake := &execx.Fake{}
+	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
+	opts, _ := parse(t, "ls", "--host", "devbox", "--json")
+	if err := runList(env, opts.List); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	if got := fake.Joined(); len(got) != 1 || got[0] != "ssh devbox we ls --json" {
+		t.Errorf("calls = %q, want [ssh devbox we ls --json]", got)
+	}
+}
+
 // captureStdout redirects os.Stdout for the duration of fn and returns
 // everything written to it.
 func captureStdout(t *testing.T, fn func()) string {

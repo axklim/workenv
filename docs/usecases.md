@@ -98,6 +98,9 @@ we attach https://github.com/axklim/trade/issues/59
 All four reach the same environment. `attach` never creates: a typo is an
 error, not a new branch.
 
+`we ls --json` prints the same environments as a JSON array, for a script or
+an agent to read instead of parsing the table.
+
 ### Rename the branch mid-flight
 
 ```
