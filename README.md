@@ -51,7 +51,7 @@ works — the binary then reports its version as `dev`, since nothing stamped it
 
 ```
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
-                   [--rc] [--host H] [--no-terminal]
+                   [--rc] [--prompt TEXT] [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--host H]
 we show   <target> [--host H]
@@ -80,6 +80,9 @@ session name is an error rather than a new branch. `--branch`, `--session` and
 them, and `open` says so on stderr when it ignored them. `--rc` starts
 `claude` with Remote Control under the session's name, for picking the session
 up from another device; `remote_control = true` does it for every environment.
+`--prompt "<text>"` gives `claude` its first prompt when the session is
+started, so it gets to work without anyone typing; a session that is already
+running is left alone, with a note on stderr.
 
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
 for when you're not standing in it: a bare name is looked up in

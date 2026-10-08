@@ -63,3 +63,23 @@ func TestFakeMatchesByPrefixAndRecords(t *testing.T) {
 		t.Errorf("Joined()[0] = %q", got)
 	}
 }
+
+// TestShellQuoteRoundTrips feeds each quoted string through a real shell:
+// whatever the text holds, it has to arrive as one argument, unchanged.
+func TestShellQuoteRoundTrips(t *testing.T) {
+	for _, s := range []string{
+		"",
+		"fix the bug",
+		"don't stop",
+		`$HOME $(id) ` + "`id`" + ` "quoted" \ ; rm -rf / & | > !`,
+		"line one\nline two",
+	} {
+		got, err := Real{}.Output("", "sh", "-c", "set -- "+ShellQuote(s)+`; printf '%d|%s|' "$#" "$1"`)
+		if err != nil {
+			t.Fatalf("sh: %v", err)
+		}
+		if want := "1|" + s + "|"; got != want {
+			t.Errorf("ShellQuote(%q) arrived as %q, want %q", s, got, want)
+		}
+	}
+}
