@@ -140,17 +140,18 @@ branch is adopted rather than duplicated.
 
 ## Claude Code skill
 
-The repository is also a Claude Code plugin: `skills/we/SKILL.md` teaches a
-session to turn "run a session for the infra project, name it review" into the
-right `we open` call — target kinds, `--repo`, `--rc`, `--prompt`,
-`--no-terminal` for a headless caller, and what `we ls` does and does not
-know. The plugin is named `workenv` and is listed in the
-`axklim/claude-plugins` marketplace; it lives here so it is versioned with the
-CLI.
+`skills/we/SKILL.md` teaches a Claude Code session to turn "run a session for
+the infra project, name it review" into the right `we open` call — target
+kinds, `--repo`, `--rc`, `--prompt`, `--no-terminal` for a headless caller,
+and what `we ls` does and does not know. It ships with the binary, so the
+skill you have always matches the `we` you have:
 
 ```
-/plugin install workenv --marketplace axklim/claude-plugins
+ln -s "$(brew --prefix)/share/workenv/skills/we" ~/.claude/skills/we
 ```
+
+The repository is also a Claude Code plugin (`.claude-plugin/plugin.json`,
+name `workenv`) for anyone who installs skills through a marketplace instead.
 
 ## How it works
 

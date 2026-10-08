@@ -96,9 +96,9 @@ dist: | $(CACHE_DIR) ## Cross-compile and package release tarballs into dist/
 		mkdir -p "$$stage" || exit 1; \
 		$(DOCKER_RUN) -e GOOS=$$goos -e GOARCH=$$goarch $(GO_IMAGE) \
 			go build -trimpath -ldflags '$(LDFLAGS)' -o "$$stage/we" ./cmd/we || exit 1; \
-		cp LICENSE README.md "$$stage/" || exit 1; \
+		cp -R LICENSE README.md skills "$$stage/" || exit 1; \
 		tar -czf "$(DIST_DIR)/workenv-$(VERSION)-$$label.tar.gz" \
-			-C "$$stage" we LICENSE README.md || exit 1; \
+			-C "$$stage" we LICENSE README.md skills || exit 1; \
 		rm -rf "$$stage"; \
 		echo "packaged workenv-$(VERSION)-$$label.tar.gz"; \
 	done
