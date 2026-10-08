@@ -132,7 +132,8 @@ that branch is found; otherwise open creates one there.
 --repo <name|path> names the repository a plain-name/branch target belongs
 to, for when you are not standing in it. A bare name is looked up in
 projects_path; a value containing a separator or starting with ~ is a path
-to the repository. Other target kinds carry their own repository, so it is
+to the repository. A bare name that is an alias (see [aliases] below) means
+its repository. Other target kinds carry their own repository, so it is
 ignored there.
 
 open and attach are one code path; attach never creates, so --branch,
@@ -170,6 +171,9 @@ Config (XDG): ~/.config/workenv/config.toml
   remote_control = false         also append --remote-control <session>;
                                  --rc does it for one open
   remote_we     = "we"           we binary path on remote hosts
+  [aliases]                      short repository names, last in the file:
+  infra = "simple-dimple-infra"  --repo infra, we open infra, and session
+                                 infra-<branch> for new environments
 
 State (XDG): ~/.local/state/workenv/envs.json
 `
