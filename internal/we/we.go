@@ -1,6 +1,6 @@
 // Package we orchestrates the work environment flows: open (find or create
 // the project checkout, worktree and tmux session running claude, then
-// surface it in a terminal), attach (find only), delete and list.
+// surface it in a terminal), attach (find only), delete, gc and list.
 //
 // A work environment is a record in the state registry (package state)
 // keyed by an integer id: its branch, tmux session and worktree path are
@@ -98,7 +98,20 @@ type Item struct {
 	WorktreePath, RepoPath   string
 	Issues, PRs              []string
 	Exists, Current          bool
+	Done                     bool // finished: worktree missing, every PR merged or closed
 	CreatedAt                time.Time
+}
+
+// GCOptions are gc's flags.
+type GCOptions struct {
+	DryRun       bool // report what would go, change nothing
+	DeleteBranch bool
+}
+
+// Retired is one environment gc dropped, or would drop.
+type Retired struct {
+	ID      int
+	Session string
 }
 
 func (e *Env) git() gitx.Git     { return gitx.Git{R: e.R} }
@@ -407,11 +420,26 @@ func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, 
 		}
 		return 0, killed, nil
 	}
-	id, session = env.ID, env.TmuxSession
+	if err := e.teardown(env, opts); err != nil {
+		return 0, "", err
+	}
+	if opts.KeepWorktree {
+		return env.ID, env.TmuxSession, nil
+	}
+	st.Remove(env.ID)
+	if err := st.Save(); err != nil {
+		return 0, "", err
+	}
+	return env.ID, env.TmuxSession, nil
+}
+
+// teardown is delete without the registry: it kills env's session, and
+// unless opts.KeepWorktree removes its worktree and optionally its branch.
+func (e *Env) teardown(env *state.Env, opts DeleteOptions) error {
 	if e.tmux().Has(env.TmuxSession) {
 		if e.tmux().IsWorkenv(env.TmuxSession) {
 			if err := e.tmux().Kill(env.TmuxSession); err != nil {
-				return 0, "", err
+				return err
 			}
 		} else {
 			// Someone else's session, not ours to touch (see Adoption in
@@ -420,7 +448,7 @@ func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, 
 		}
 	}
 	if opts.KeepWorktree {
-		return id, session, nil
+		return nil
 	}
 	if env.WorktreePath == env.RepoPath {
 		// The main working tree: git refuses to remove it (even with
@@ -430,7 +458,7 @@ func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, 
 	} else {
 		if _, err := os.Stat(env.WorktreePath); err == nil {
 			if err := e.git().RemoveWorktree(env.RepoPath, env.WorktreePath, opts.Force); err != nil {
-				return 0, "", err
+				return err
 			}
 		} else {
 			// Directory already gone: just let git forget it.
@@ -438,15 +466,11 @@ func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, 
 		}
 		if opts.DeleteBranch && env.Branch != "" {
 			if err := e.git().DeleteBranch(env.RepoPath, env.Branch); err != nil {
-				return 0, "", err
+				return err
 			}
 		}
 	}
-	st.Remove(env.ID)
-	if err := st.Save(); err != nil {
-		return 0, "", err
-	}
-	return id, session, nil
+	return nil
 }
 
 // killStray is delete's last resort for a target that is not in the
@@ -490,7 +514,9 @@ func (e *Env) Show(t target.Target, repo string) (Item, error) {
 		return Item{}, err
 	}
 	item, _ := e.toItem(env, sessions)
-	return item, nil
+	items := []Item{item}
+	e.markDone(items)
+	return items[0], nil
 }
 
 func (e *Env) List() ([]Item, error) {
@@ -510,6 +536,7 @@ func (e *Env) List() ([]Item, error) {
 		changed = changed || refreshed
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	e.markDone(items)
 	if changed {
 		if err := st.Save(); err != nil {
 			return nil, err
@@ -552,6 +579,93 @@ func (e *Env) toItem(env *state.Env, sessions []tmuxx.Session) (Item, bool) {
 	}
 	item.Current = within(env.WorktreePath, e.Cwd)
 	return item, changed
+}
+
+// markDone sets Done on the items whose environment is finished. ls must
+// work without GitHub, so a gh failure leaves the item not done, and stops
+// the lookups for the rest: offline, each one would only fail again.
+func (e *Env) markDone(items []Item) {
+	for i := range items {
+		if items[i].Exists || len(items[i].PRs) == 0 {
+			continue
+		}
+		done, err := e.prsFinished(items[i].PRs)
+		if err != nil {
+			return
+		}
+		items[i].Done = done
+	}
+}
+
+// GC drops every finished environment: its worktree is missing and every
+// linked PR is merged or closed. Environments without a PR are never
+// finished. GitHub is asked about all candidates before anything is
+// touched, so a gh failure deletes nothing.
+func (e *Env) GC(opts GCOptions) ([]Retired, error) {
+	st, err := state.Load(e.StatePath)
+	if err != nil {
+		return nil, err
+	}
+	var finished []*state.Env
+	for _, env := range st.Envs {
+		if len(env.PRs) == 0 {
+			continue
+		}
+		if _, err := os.Stat(env.WorktreePath); err == nil {
+			continue
+		}
+		done, err := e.prsFinished(env.PRs)
+		if err != nil {
+			return nil, fmt.Errorf("checking the PRs of environment %d: %w", env.ID, err)
+		}
+		if done {
+			finished = append(finished, env)
+		}
+	}
+	retired := make([]Retired, 0, len(finished))
+	if opts.DryRun {
+		for _, env := range finished {
+			retired = append(retired, Retired{ID: env.ID, Session: env.TmuxSession})
+		}
+		return retired, nil
+	}
+	var terr error
+	for _, env := range finished {
+		if terr = e.teardown(env, DeleteOptions{DeleteBranch: opts.DeleteBranch}); terr != nil {
+			terr = fmt.Errorf("environment %d: %w", env.ID, terr)
+			break
+		}
+		st.Remove(env.ID)
+		retired = append(retired, Retired{ID: env.ID, Session: env.TmuxSession})
+	}
+	if len(retired) > 0 {
+		if err := st.Save(); err != nil {
+			return nil, err
+		}
+	}
+	return retired, terr
+}
+
+// prsFinished reports whether every PR in prs is merged or closed, asking
+// gh once per PR and stopping at the first open one.
+func (e *Env) prsFinished(prs []string) (bool, error) {
+	for _, u := range prs {
+		t, err := target.Parse(u)
+		if err != nil {
+			return false, err
+		}
+		if t.Kind != target.KindPR {
+			return false, fmt.Errorf("%s is not a pull request URL", u)
+		}
+		s, err := e.github().PRState(t.Owner, t.Repo, t.Number)
+		if err != nil {
+			return false, err
+		}
+		if s != "MERGED" && s != "CLOSED" {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // claudeRunning reports whether the first pane still runs claude. claude

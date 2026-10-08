@@ -25,6 +25,7 @@ environment instead of making another. Every command takes the same
 | "what is running?" | `we ls` |
 | "details of 7" | `we show 7` |
 | "tear down 7" | `we delete 7` (`--delete-branch` drops the branch too) |
+| "clean up finished work" | `we gc --dry-run`, then `we gc` |
 
 A name the caller gives the work is the **branch**, passed as a plain-name
 target. The session is then `<project>-<branch>` (sanitized: anything outside
@@ -80,7 +81,7 @@ we open https://github.com/OWNER/trade/issues/59 --no-terminal --rc \
 branch, worktree, session and a `WE_SESSION=<session>` line. Read the session
 name from there rather than deriving it.
 
-**Versions.** `--rc`, `--prompt` and `remote_control` are on `main` and in no
+**Versions.** `--rc`, `--prompt`, `remote_control` and `gc` are on `main` and in no
 release through 0.1.3; the next release carries them. Everything else here is
 in 0.1.3. `we version` says which you have, `we open --help` which flags it
 knows.
@@ -95,6 +96,10 @@ anything else, including a version such as `2.1.295`, means it still runs.
 - `attached` — a terminal is on the session.
 - `detached` — the session is alive, nobody is looking at it.
 - `none` — no tmux session; the next `open` or `attach` recreates it.
+- `done` — every linked PR is merged or closed and the worktree is gone
+  (`"done": true` in `--json`). `we gc` deletes these, killing a live session;
+  environments without a PR never are. Without `gh`, `ls` shows no `done` and
+  `gc` fails.
 
 `(missing)` after `dir:` means the worktree is gone; the next `open` or
 `attach` re-adds it. Both repair; only `open` creates. `*` marks the environment the cwd is in. `we ls -l` and `we show <target>`

@@ -108,12 +108,21 @@ func dirLine(it we.Item) string {
 }
 
 // stateText is STATE as ls and show print it: the tmux state, followed by
-// the first pane's command when there is a session — "detached (zsh)".
+// the first pane's command when there is a session — "detached (zsh)". A
+// finished environment reads "done", followed by its session if one is
+// still live.
 func stateText(it we.Item) string {
-	if it.PaneCommand == "" {
-		return it.SessionState
+	s := it.SessionState
+	if it.PaneCommand != "" {
+		s += " (" + it.PaneCommand + ")"
 	}
-	return it.SessionState + " (" + it.PaneCommand + ")"
+	if !it.Done {
+		return s
+	}
+	if it.SessionState == "none" {
+		return "done"
+	}
+	return "done, " + s
 }
 
 // renderList prints `ls`'s output: with opts.Long, the stacked form for
@@ -241,6 +250,7 @@ type jsonItem struct {
 	ClaudeRunning   bool      `json:"claude_running"`
 	WorktreePath    string    `json:"worktree_path"`
 	WorktreeMissing bool      `json:"worktree_missing"`
+	Done            bool      `json:"done"`
 	RepoPath        string    `json:"repo_path"`
 	Issues          []string  `json:"issues"`
 	PRs             []string  `json:"prs"`
@@ -255,7 +265,7 @@ func renderJSON(w io.Writer, items []we.Item) error {
 		out = append(out, jsonItem{
 			ID: it.ID, Project: it.Project, Branch: it.Branch, Session: it.Session,
 			State: it.SessionState, PaneCommand: it.PaneCommand, ClaudeRunning: it.ClaudeRunning,
-			WorktreePath: it.WorktreePath, WorktreeMissing: !it.Exists,
+			WorktreePath: it.WorktreePath, WorktreeMissing: !it.Exists, Done: it.Done,
 			RepoPath: it.RepoPath, Issues: nonNil(it.Issues), PRs: nonNil(it.PRs),
 			CreatedAt: it.CreatedAt,
 		})
