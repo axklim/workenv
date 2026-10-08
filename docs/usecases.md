@@ -12,6 +12,7 @@ Worked examples, in the order a day tends to go. Paths assume
   worktree
 - [Placement and cleanup](#placement-and-cleanup) — one-off paths, tearing down
 - [On another machine](#on-another-machine) — `--host`
+- [From another device](#from-another-device) — `--rc`
 
 ## Starting work
 
@@ -161,3 +162,16 @@ we delete 7 --host devbox
 The environment is created on devbox and recorded in devbox's registry; the
 local Ghostty attaches to it over ssh. Ids are per host, so `7` there is not
 `7` here.
+
+## From another device
+
+```
+we open https://github.com/axklim/trade/issues/59 --rc --no-terminal
+```
+
+`claude` starts with `--remote-control trade-review-claude-md-file` as well
+as `--name`, so the session appears under its tmux name in the Remote
+Control list of a phone or laptop, with no terminal attached here. A session
+started by another agent on this machine can be picked up that way. Set
+`remote_control = true` to do it for every environment; `--rc` only matters
+when the session is started, so a live one is left as it is.

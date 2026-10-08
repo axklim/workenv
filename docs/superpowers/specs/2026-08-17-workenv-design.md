@@ -255,7 +255,7 @@ worktree gets its own environment. A worktree can only be on one branch.
 
 ```
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
-                   [--host H] [--no-terminal]
+                   [--rc] [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--host H]
 we show   <target> [--host H]
@@ -287,8 +287,17 @@ ignored, so re-running a command from shell history still attaches.
 - tmux session missing → create, tag, start `claude_cmd` in the first
   window with `--name <session>` appended, so Claude Code's own session
   name matches the tmux session (a `claude_cmd` that already passes `-n`
-  or `--name` keeps its own);
+  or `--name` keeps its own); with Remote Control on, `--remote-control
+  <session>` is appended too, so the name the session is reachable under
+  from another device is the same one (same rule: a `claude_cmd` that
+  passes `--remote-control` itself keeps its own);
 - branch renamed inside the worktree → the stored branch is refreshed.
+
+**Remote Control** is off unless `remote_control = true` in the config or
+`we open --rc` turns it on for one open. Either only matters when repair
+starts the session: a session that is already live keeps the claude it
+runs, and `--rc` says nothing then. `attach` does not define `--rc`, like
+the creation overrides.
 
 **Adoption.** A live tmux session with the target name is reused only if it
 carries `@workenv`. An untagged session of the same name is someone else's,
@@ -330,8 +339,10 @@ ID  PROJECT  SESSION                                       STATE     REFS
 ## Remote hosts
 
 `--host devbox` runs the same command over ssh with `--no-terminal` and the
-creation overrides passed through, parses the `WE_SESSION=` marker, and opens
-a local Ghostty running `ssh -t devbox tmux attach-session -t <session>`.
+creation overrides and `--rc` passed through, parses the `WE_SESSION=`
+marker, and opens a local Ghostty running `ssh -t devbox tmux attach-session
+-t <session>`. `remote_control` is read from the remote host's config, since
+that is the `we` starting claude.
 `ls`, `show` and `delete` pass through unchanged. The remote host needs `we`
 installed; its path is `remote_we`.
 
@@ -344,6 +355,8 @@ installed; its path is `remote_we`.
 projects_path = "~/projects"   # where repositories live / get cloned
 claude_cmd    = "claude"       # command run in the first tmux window,
                                # with --name <session> appended
+remote_control = false         # also append --remote-control <session>;
+                               # `we open --rc` does it for one open
 remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go; see Placement for variables and filters
@@ -361,7 +374,8 @@ runner, asserting exact argv and the persisted registry:
   origin.
 - **we** — each resolution path above; issue and PR converging on one
   environment; adoption of an existing worktree; refusal to adopt an untagged
-  session; repair of a missing worktree and session; branch drift; placement
+  session; repair of a missing worktree and session, with Remote Control
+  from the config or `--rc`; branch drift; placement
   (default template, a custom `worktree_path`, `--wt` name and path);
   delete semantics.
 - **config** — template rendering: variables, the `sanitize` filter, `~`

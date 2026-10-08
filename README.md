@@ -51,7 +51,7 @@ works — the binary then reports its version as `dev`, since nothing stamped it
 
 ```
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
-                   [--host H] [--no-terminal]
+                   [--rc] [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--host H]
 we show   <target> [--host H]
@@ -77,7 +77,9 @@ we version
 `open` finds an environment or creates one; `attach` only finds, so a mistyped
 session name is an error rather than a new branch. `--branch`, `--session` and
 `--wt` apply only when an environment is created — `attach` doesn't define
-them, and `open` says so on stderr when it ignored them.
+them, and `open` says so on stderr when it ignored them. `--rc` starts
+`claude` with Remote Control under the session's name, for picking the session
+up from another device; `remote_control = true` does it for every environment.
 
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
 for when you're not standing in it: a bare name is looked up in
@@ -114,6 +116,8 @@ XDG notation: `~/.config/workenv/config.toml` (or
 projects_path = "~/projects"   # where repositories live / get cloned
 claude_cmd    = "claude"       # command run in the first tmux window,
                                # with --name <session> appended
+remote_control = false         # also append --remote-control <session>;
+                               # `we open --rc` does it for one open
 remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go — a Go text/template; variables and filters are

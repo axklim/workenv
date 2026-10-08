@@ -26,6 +26,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.RemoteWe != "we" {
 		t.Errorf("RemoteWe = %q, want we", cfg.RemoteWe)
 	}
+	if cfg.RemoteControl {
+		t.Error("RemoteControl = true, want false by default")
+	}
 }
 
 func TestParseOverrides(t *testing.T) {
@@ -36,6 +39,7 @@ projects_path = "~/src"
 worktree_path = "~/worktrees/{{ .project }}/{{ .branch | sanitize }}"
 claude_cmd = "claude --dangerously-skip-permissions"
 remote_we = "/usr/local/bin/we"
+remote_control = true
 `
 	cfg, err := parse(raw, home)
 	if err != nil {
@@ -52,6 +56,28 @@ remote_we = "/usr/local/bin/we"
 	}
 	if cfg.RemoteWe != "/usr/local/bin/we" {
 		t.Errorf("RemoteWe = %q", cfg.RemoteWe)
+	}
+	if !cfg.RemoteControl {
+		t.Error("RemoteControl = false, want true")
+	}
+}
+
+// TestParseRemoteControlIsBoolean pins the value syntax: TOML booleans are
+// bare true/false, and anything else is a config error rather than a silent
+// false — a typo must not quietly turn Remote Control off.
+func TestParseRemoteControlIsBoolean(t *testing.T) {
+	for _, raw := range []string{`remote_control = false`, `remote_control = "false"`} {
+		cfg, err := parse(raw, "/home/u")
+		if err != nil {
+			t.Errorf("parse(%q): %v", raw, err)
+		} else if cfg.RemoteControl {
+			t.Errorf("parse(%q): RemoteControl = true, want false", raw)
+		}
+	}
+	for _, raw := range []string{`remote_control = yes`, `remote_control = 1`, `remote_control = ""`} {
+		if _, err := parse(raw, "/home/u"); err == nil {
+			t.Errorf("parse(%q): expected error for a non-boolean value, got nil", raw)
+		}
 	}
 }
 

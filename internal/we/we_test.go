@@ -637,20 +637,65 @@ func TestOpenNamesClaudeSessionAfterTmuxSession(t *testing.T) {
 	}
 }
 
+// TestOpenStartsClaudeWithRemoteControl covers issue #16: with Remote
+// Control on — remote_control in the config, or --rc for this one open —
+// claude is also started with --remote-control <session>, so the name it
+// is reachable under from another device is the tmux session too. Off is
+// the default, which the exact send-keys line in
+// TestOpenNamesClaudeSessionAfterTmuxSession already pins.
+func TestOpenStartsClaudeWithRemoteControl(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config bool
+		flag   bool
+	}{
+		{"config", true, false},
+		{"flag", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession}}
+			env, repo := newTestEnv(t, fake)
+			env.Cfg.RemoteControl = tc.config
+			gone := filepath.Join(env.Cwd, "gone")
+			seed(t, env, &state.Env{Project: "proj", Branch: "feature-123", TmuxSession: "proj-feature-123", WorktreePath: gone, RepoPath: repo})
+
+			if _, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true, RemoteControl: tc.flag}); err != nil {
+				t.Fatalf("Open error: %v", err)
+			}
+			want := "tmux send-keys -t proj-feature-123 claude --name proj-feature-123 --remote-control proj-feature-123 Enter"
+			if !slices.Contains(fake.Joined(), want) {
+				t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+			}
+		})
+	}
+}
+
 // TestClaudeCommand covers the rest of the naming rule: a claude_cmd that
 // already names the session keeps its own name, and the appended name is
-// sanitized, so send-keys always types one shell word.
+// sanitized, so send-keys always types one shell word. --remote-control
+// follows the same rule: appended only when Remote Control is on and the
+// claude_cmd does not pass it itself, and always with the sanitized name.
 func TestClaudeCommand(t *testing.T) {
-	for _, tc := range []struct{ cmd, session, want string }{
-		{"claude", "proj-feature", "claude --name proj-feature"},
-		{"claude --model opus", "proj-feature", "claude --model opus --name proj-feature"},
-		{"claude --name mine", "proj-feature", "claude --name mine"},
-		{"claude --name=mine", "proj-feature", "claude --name=mine"},
-		{"claude -n mine", "proj-feature", "claude -n mine"},
-		{"claude", "hand edited; rm -rf /", "claude --name hand-edited-rm-rf"},
+	for _, tc := range []struct {
+		cmd, session string
+		rc           bool
+		want         string
+	}{
+		{"claude", "proj-feature", false, "claude --name proj-feature"},
+		{"claude --model opus", "proj-feature", false, "claude --model opus --name proj-feature"},
+		{"claude --name mine", "proj-feature", false, "claude --name mine"},
+		{"claude --name=mine", "proj-feature", false, "claude --name=mine"},
+		{"claude -n mine", "proj-feature", false, "claude -n mine"},
+		{"claude", "hand edited; rm -rf /", false, "claude --name hand-edited-rm-rf"},
+		{"claude", "proj-feature", true, "claude --name proj-feature --remote-control proj-feature"},
+		{"claude --name mine", "proj-feature", true, "claude --name mine --remote-control proj-feature"},
+		{"claude --remote-control mine", "proj-feature", true, "claude --remote-control mine --name proj-feature"},
+		{"claude --remote-control=mine", "proj-feature", true, "claude --remote-control=mine --name proj-feature"},
+		{"claude --remote-control mine", "proj-feature", false, "claude --remote-control mine --name proj-feature"},
+		{"claude", "hand edited; rm -rf /", true, "claude --name hand-edited-rm-rf --remote-control hand-edited-rm-rf"},
 	} {
-		if got := claudeCommand(tc.cmd, tc.session); got != tc.want {
-			t.Errorf("claudeCommand(%q, %q) = %q, want %q", tc.cmd, tc.session, got, tc.want)
+		if got := claudeCommand(tc.cmd, tc.session, tc.rc); got != tc.want {
+			t.Errorf("claudeCommand(%q, %q, %v) = %q, want %q", tc.cmd, tc.session, tc.rc, got, tc.want)
 		}
 	}
 }

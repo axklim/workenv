@@ -63,6 +63,10 @@ type OpenOptions struct {
 	// worktrees — but never creates, clones or fetches.
 	AttachOnly bool
 	NoTerminal bool
+	// RemoteControl starts claude with Remote Control for this open,
+	// whatever the config says. It only matters when the session is
+	// started: a session that is already live keeps the claude it runs.
+	RemoteControl bool
 }
 
 type OpenResult struct {
@@ -106,7 +110,7 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	if err != nil {
 		return OpenResult{}, err
 	}
-	if err := e.repair(env, created); err != nil {
+	if err := e.repair(env, created, opts.RemoteControl || e.Cfg.RemoteControl); err != nil {
 		return OpenResult{}, err
 	}
 	if err := st.Save(); err != nil {
@@ -256,11 +260,13 @@ func (e *Env) renderPlacement(sp spec, project, branch string) (string, error) {
 // what actually materialises them. created selects which of the two
 // Adoption refusal messages repairSession gives on a session-name conflict:
 // --session still helps on a fresh creation, but cannot on a hit.
-func (e *Env) repair(env *state.Env, created bool) error {
+// remoteControl decides whether a session it starts runs claude with
+// Remote Control.
+func (e *Env) repair(env *state.Env, created, remoteControl bool) error {
 	if err := e.repairWorktree(env); err != nil {
 		return err
 	}
-	if err := e.repairSession(env, created); err != nil {
+	if err := e.repairSession(env, created, remoteControl); err != nil {
 		return err
 	}
 	if b := e.git().CurrentBranch(env.WorktreePath); b != "" {
@@ -296,7 +302,7 @@ func (e *Env) repairWorktree(env *state.Env) error {
 // helps; for an environment that already exists, --session cannot change
 // anything (it is a creation-only override, ignored on a hit), so the
 // message instead points at the conflicting session itself.
-func (e *Env) repairSession(env *state.Env, created bool) error {
+func (e *Env) repairSession(env *state.Env, created, remoteControl bool) error {
 	if e.tmux().Has(env.TmuxSession) {
 		if !e.tmux().IsWorkenv(env.TmuxSession) {
 			if created {
@@ -309,20 +315,32 @@ func (e *Env) repairSession(env *state.Env, created bool) error {
 	if err := e.tmux().New(env.TmuxSession, env.WorktreePath, env.ID); err != nil {
 		return err
 	}
-	return e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession))
+	return e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, remoteControl))
 }
 
-func claudeCommand(cmd, session string) string {
-	if namesSession(cmd) {
-		return cmd
+// claudeCommand is cmd with --name <session> appended and, when
+// remoteControl, --remote-control <session> as well, so the name claude
+// shows and the name it is reachable under both match the tmux session. A
+// cmd that already passes either flag keeps its own value for it.
+func claudeCommand(cmd, session string, remoteControl bool) string {
+	name := naming.Sanitize(session)
+	if !hasFlag(cmd, "-n", "--name") {
+		cmd += " --name " + name
 	}
-	return cmd + " --name " + naming.Sanitize(session)
+	if remoteControl && !hasFlag(cmd, "--remote-control") {
+		cmd += " --remote-control " + name
+	}
+	return cmd
 }
 
-func namesSession(cmd string) bool {
+// hasFlag reports whether cmd passes any of flags, as its own word or in
+// --flag=value form.
+func hasFlag(cmd string, flags ...string) bool {
 	for _, f := range strings.Fields(cmd) {
-		if f == "-n" || f == "--name" || strings.HasPrefix(f, "--name=") {
-			return true
+		for _, want := range flags {
+			if f == want || strings.HasPrefix(f, want+"=") {
+				return true
+			}
 		}
 	}
 	return false

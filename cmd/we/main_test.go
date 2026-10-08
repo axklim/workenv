@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,13 +37,49 @@ func parse(t *testing.T, args ...string) (options, string) {
 // inside openCmd) are actually reached by go-flags' reflection — a silent
 // wiring failure there would leave every flag at its zero value.
 func TestParseAcceptsFlagsAroundTarget(t *testing.T) {
-	opts, name := parse(t, "open", "--branch", "b", "7", "--wt", "/tmp/wt", "--repo", "trade", "--no-terminal")
+	opts, name := parse(t, "open", "--branch", "b", "7", "--wt", "/tmp/wt", "--repo", "trade", "--no-terminal", "--rc")
 	if name != "open" {
 		t.Fatalf("active command = %q, want \"open\"", name)
 	}
 	o := opts.Open
-	if o.Args.Target != "7" || o.Branch != "b" || o.Wt != "/tmp/wt" || o.Repo != "trade" || !o.NoTerminal {
+	if o.Args.Target != "7" || o.Branch != "b" || o.Wt != "/tmp/wt" || o.Repo != "trade" || !o.NoTerminal || !o.RC {
 		t.Errorf("open parsed as %+v", o)
+	}
+}
+
+// TestRunOpenStartsClaudeWithRemoteControl drives `we open <session> --rc`
+// end to end from the real parser: what the user types has to reach the
+// claude command tmux is sent, not just the parsed options struct. The
+// seeded environment's worktree is missing, so repair recreates it (the
+// fake answers every git call), and the scripted has-session failure makes
+// repair start the session — the one path that types the claude command.
+func TestRunOpenStartsClaudeWithRemoteControl(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "proj")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	statePath := filepath.Join(root, "envs.json")
+	st := &state.Store{Path: statePath}
+	st.Add(&state.Env{Project: "proj", Branch: "x", TmuxSession: "proj-x", WorktreePath: filepath.Join(root, "gone"), RepoPath: repo})
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "tmux has-session", Err: errors.New("no server running")},
+	}}
+	env := &we.Env{Cfg: config.Config{ClaudeCmd: "claude"}, R: fake, StatePath: statePath, Cwd: root}
+
+	opts, _ := parse(t, "open", "proj-x", "--rc", "--no-terminal")
+	captureStdout(t, func() {
+		if err := runOpen(env, "open", opts.Open, false); err != nil {
+			t.Fatalf("runOpen: %v", err)
+		}
+	})
+	want := "tmux send-keys -t proj-x claude --name proj-x --remote-control proj-x Enter"
+	if !slices.Contains(fake.Joined(), want) {
+		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
 	}
 }
 
@@ -110,7 +148,7 @@ func TestOpenRemoteUsesOutputPassStderr(t *testing.T) {
 	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
 
 	// noTerminal:true keeps this to the one ssh call — no local AttachRemote.
-	if err := openRemote(env, "open", "devbox", "7", "", "", "", "", true); err != nil {
+	if err := openRemote(env, "open", "devbox", "7", "", "", "", "", false, true); err != nil {
 		t.Fatalf("openRemote: %v", err)
 	}
 
@@ -129,18 +167,20 @@ func TestOpenRemoteUsesOutputPassStderr(t *testing.T) {
 
 // TestOpenRemotePassesThroughOverridesInOrder checks the documented
 // pass-through order survives the switch to OutputPassStderr: --no-terminal
-// first, then whichever of --repo, --branch, --session, --wt were given.
+// first, then whichever of --repo, --branch, --session, --wt, --rc were
+// given. --rc rides along because the remote's claude is the one that has
+// to be reachable, and it is the remote we that starts it.
 func TestOpenRemotePassesThroughOverridesInOrder(t *testing.T) {
 	fake := &execx.Fake{Responses: []execx.FakeResponse{
 		{Prefix: "ssh devbox we open feature-1", Out: "created environment 9\nWE_SESSION=trade-feature-1\n"},
 	}}
 	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
 
-	err := openRemote(env, "open", "devbox", "feature-1", "trade", "feature-1", "sess", "~/wt", true)
+	err := openRemote(env, "open", "devbox", "feature-1", "trade", "feature-1", "sess", "~/wt", true, true)
 	if err != nil {
 		t.Fatalf("openRemote: %v", err)
 	}
-	want := "ssh devbox we open feature-1 --no-terminal --repo trade --branch feature-1 --session sess --wt ~/wt"
+	want := "ssh devbox we open feature-1 --no-terminal --repo trade --branch feature-1 --session sess --wt ~/wt --rc"
 	if got := strings.Join(fake.Calls[0].Argv, " "); got != want {
 		t.Errorf("argv = %q, want %q", got, want)
 	}
