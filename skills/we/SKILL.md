@@ -38,6 +38,8 @@ Issue, PR and repository URLs carry their repository: `we` finds it under
 unless the cwd is inside that repository: a bare name is looked up in
 `projects_path`, a path (`~/src/fork`) reaches a repository anywhere. Ids,
 session names and branches already in the registry need no `--repo`.
+An `[aliases]` table in the config (`infra = "simple-dimple-infra"`) lets
+`--repo infra` and `we open infra` stand for the repository, named `infra-…`.
 
 ## Project home versus task branch
 

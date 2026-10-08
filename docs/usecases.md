@@ -73,6 +73,25 @@ No issue, no PR. The branch is the default branch, and a normal clone already
 has it checked out at `~/projects/trade`, so that worktree is adopted rather
 than created. Session `trade-main`.
 
+### Use a short name for a long repository
+
+```toml
+# ~/.config/workenv/config.toml
+[aliases]
+infra = "simple-dimple-infra"
+```
+
+```
+we open review --repo infra
+we open infra
+```
+
+The first is branch `review` in `~/projects/simple-dimple-infra`: session
+`infra-review`, worktree `~/projects/simple-dimple-infra.review` (the path
+keeps the repository name; a `worktree_path` template can use `{{ .alias }}`).
+The second is the project home on the default branch, session `infra-main`.
+Environments made before the alias keep their `simple-dimple-infra-…` names.
+
 ### Start a branch with no issue behind it
 
 ```

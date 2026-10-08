@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,6 +112,64 @@ func TestParseRejectsRetiredKeys(t *testing.T) {
 func TestParseRejectsUnknownKey(t *testing.T) {
 	if _, err := parse(`nonsense = "x"`, "/home/u"); err == nil {
 		t.Error("expected error for unknown key, got nil")
+	}
+}
+
+func TestParseAliases(t *testing.T) {
+	raw := `
+projects_path = "~/src"
+
+[aliases]
+# comment
+infra = "simple-dimple-infra"
+[ aliases ]
+w_e-2 = "workenv"
+`
+	cfg, err := parse(raw, "/home/u")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cfg.ProjectsPath != "/home/u/src" {
+		t.Errorf("ProjectsPath = %q, want /home/u/src", cfg.ProjectsPath)
+	}
+	want := map[string]string{"infra": "simple-dimple-infra", "w_e-2": "workenv"}
+	if !maps.Equal(cfg.Aliases, want) {
+		t.Errorf("Aliases = %v, want %v", cfg.Aliases, want)
+	}
+	if got := cfg.AliasFor("simple-dimple-infra"); got != "infra" {
+		t.Errorf("AliasFor(simple-dimple-infra) = %q, want infra", got)
+	}
+	if got := cfg.AliasFor("trade"); got != "trade" {
+		t.Errorf("AliasFor(trade) = %q, want trade (no alias)", got)
+	}
+}
+
+// TestParseAliasesTableRunsToTheEnd pins TOML's table semantics: a key
+// after [aliases] is an alias, never a top-level setting.
+func TestParseAliasesTableRunsToTheEnd(t *testing.T) {
+	cfg, err := parse("[aliases]\nclaude_cmd = \"x\"\n", "/home/u")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cfg.ClaudeCmd != "claude" || cfg.Aliases["claude_cmd"] != "x" {
+		t.Errorf("ClaudeCmd = %q, Aliases = %v; want the key read as an alias", cfg.ClaudeCmd, cfg.Aliases)
+	}
+}
+
+func TestParseRejectsBadAliases(t *testing.T) {
+	for _, raw := range []string{
+		"[remotes]\nx = \"y\"",
+		"[aliases]\n\"in fra\" = \"simple-dimple-infra\"",
+		"[aliases]\nin.fra = \"simple-dimple-infra\"",
+		"[aliases]\ninfra = \"\"",
+		"[aliases]\ninfra = \"~/src/simple-dimple-infra\"",
+		"[aliases]\ninfra = \"axklim/simple-dimple-infra\"",
+		"[aliases]\ninfra = \"a\"\ninfra = \"b\"",
+		"[aliases]\ninfra = \"simple-dimple-infra\"\nsdi = \"simple-dimple-infra\"",
+	} {
+		if _, err := parse(raw, "/home/u"); err == nil {
+			t.Errorf("parse(%q): expected an error, got nil", raw)
+		}
 	}
 }
 

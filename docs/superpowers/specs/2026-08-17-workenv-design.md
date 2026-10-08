@@ -109,8 +109,9 @@ For a **new** environment:
 | worktree dir | placement rule, leaf `<branch>`, sanitized  |
 
 `project` is the repository name from the `origin` remote when it points at
-GitHub, else the `repo_path` basename with any `.git` suffix removed. Two
-clones of the same repository therefore share a project name; their
+GitHub, else the `repo_path` basename with any `.git` suffix removed — unless
+that repository name has an alias (see *Aliases*), which is then the project
+name. Two clones of the same repository therefore share a project name; their
 environments stay distinct because sessions and directories must be unique,
 and `--session` / `--wt` resolve a collision.
 
@@ -120,6 +121,33 @@ segment. So branch `feat/static-grid` yields session `trade-feat-static-grid`
 and directory `trade.feat-static-grid`.
 
 There is no `we-` prefix and no issue/PR number in any name.
+
+### Aliases
+
+Repository names can be long, and they end up in every session name and
+every `--repo`. The `[aliases]` table in the config gives a repository a
+short name:
+
+```toml
+[aliases]
+infra = "simple-dimple-infra"
+```
+
+The value is a repository name, as found in `projects_path`; a path is not
+accepted. One repository has at most one alias. The alias:
+
+- stands for the repository in `--repo infra`, looked up in the table before
+  `projects_path` is searched;
+- is a target of its own: `we open infra` opens the repository like its URL
+  (see *Resolution*);
+- is the project name of every environment created in that repository,
+  whatever target created it: session `infra-review`, `PROJECT` column
+  `infra`, `project` in `--json`.
+
+The worktree path keeps the real repository name (`.repo`, `.project`); a
+template that wants the alias uses `.alias`. Since names are stored, not
+derived, an environment created before its alias keeps its names — adding,
+changing or removing an alias never renames anything.
 
 ## Placement
 
@@ -141,7 +169,8 @@ Available variables and filters:
 |----------------|----------------------------------------------|
 | `.repo_path`   | absolute path of the repository directory    |
 | `.repo`        | its basename, without any `.git` suffix      |
-| `.project`     | project name (see *Naming*)                  |
+| `.project`     | repository name (see *Naming*), never the alias |
+| `.alias`       | the repository's alias, else `.project`      |
 | `.owner`       | GitHub owner, empty when there is none       |
 | `.branch`      | the branch being checked out                 |
 | `sanitize`     | filter: filesystem-safe form of its argument |
@@ -192,6 +221,7 @@ Every command takes the same `<target>`:
 | PR URL        | `https://github.com/o/r/pull/61`         |
 | repository URL| `https://github.com/o/r`                 |
 | plain name    | `feature-123` (a branch to create)       |
+| alias         | `infra` (see *Aliases*)                  |
 
 A plain name and a branch are the same syntax: an existing environment on
 that branch is found; otherwise `open` creates one there.
@@ -242,7 +272,11 @@ arrives through a new URL is recorded on the environment it resolved to.
    means the same thing here as it does for `delete`. Several matches
    elsewhere are an error naming them and suggesting `--repo` — never a
    silent third environment on the same branch name.
-4. `attach` errors; `open` needs a repository — the cwd's or `--repo` — and
+4. With no `--repo`, an alias opens its repository: branch `--branch`, else
+   the default branch, then registry by branch, adoption or creation — as
+   for a repository URL, but the repository is never cloned. With `--repo`
+   the string is a branch, alias or not.
+5. `attach` errors; `open` needs a repository — the cwd's or `--repo` — and
    creates on branch `--branch`, else the string itself. A string that is
    all digits is refused there: it can only be a stale id, never a branch
    worth creating, unless `--branch` says otherwise.
@@ -267,7 +301,7 @@ we gc     [--dry-run] [--delete-branch] [--host H]
 
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
 for when you are not standing in it: `we open feature-123 --repo trade`. A
-bare name is looked up in `projects_path`; a value containing a separator or
+bare name is an alias, else looked up in `projects_path`; a value containing a separator or
 starting with `~` is a path to the repository, which is how repositories
 outside `projects_path` are reached. Other target kinds carry their own
 repository, so it is ignored there.
@@ -405,7 +439,16 @@ remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go; see Placement for variables and filters
 worktree_path = "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"
+
+[aliases]                      # short names for repositories; see Aliases
+infra = "simple-dimple-infra"
 ```
+
+The parser is line-based, not a TOML library: `key = "value"` lines, `#`
+comment lines, and the `[aliases]` table header. As in TOML, a table runs to
+the next header, so top-level keys come before it. Alias names keep to
+TOML's bare-key characters `[A-Za-z0-9_-]`; quoted keys, inline tables and
+other tables are rejected.
 
 ## Testing
 
@@ -422,12 +465,14 @@ runner, asserting exact argv and the persisted registry:
   from the config or `--rc` and with an initial prompt; a prompt ignored by
   a live session; branch drift; placement
   (default template, a custom `worktree_path`, `--wt` name and path);
-  delete semantics; gc collecting only finished environments, `--dry-run`,
+  delete semantics; aliases in `--repo` and as a target, naming a new
+  environment but leaving an existing one's names and the worktree path
+  alone; gc collecting only finished environments, `--dry-run`,
   failing without `gh` before touching anything, and `ls` marking `done`
   and staying usable without `gh`.
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails
-  to parse or render.
+  to parse or render; the `[aliases]` table and its rejected forms.
 - **tmuxx** — the first pane's command per session.
 - **cmd** — listing layout, TTY vs piped rendering, `show`, the `--json`
   keys and the empty array, the `done` state, `gc` output and `--host`.
@@ -491,6 +536,23 @@ we open https://github.com/axklim/trade
 No issue, no PR. The branch is the default branch, and a normal clone already
 has it checked out at `~/projects/trade`, so that worktree is adopted rather
 than created. Session `trade-main`.
+
+### Use a short name for a long repository
+
+```toml
+[aliases]
+infra = "simple-dimple-infra"
+```
+
+```
+we open review --repo infra
+we open infra
+```
+
+The first is branch `review` in `~/projects/simple-dimple-infra`: session
+`infra-review`, worktree `~/projects/simple-dimple-infra.review`. The second
+is the project home, session `infra-main`. Environments made before the alias
+keep their `simple-dimple-infra-…` names.
 
 ### Start a branch with no issue behind it
 

@@ -176,7 +176,9 @@ func ignoredOverrides(opts OpenOptions) []string {
 // and the record is added — but not yet materialised on disk or in tmux;
 // that is repair's job, run uniformly for a hit and a fresh creation alike.
 func (e *Env) create(st *state.Store, opts OpenOptions, sp spec, existingPath string) (*state.Env, error) {
-	project := e.git().ProjectName(sp.repoPath)
+	// The alias names the environment; placement keeps the repository name.
+	repoName := e.git().ProjectName(sp.repoPath)
+	project := e.Cfg.AliasFor(repoName)
 
 	session := naming.Sanitize(opts.Session)
 	if session == "" {
@@ -186,7 +188,7 @@ func (e *Env) create(st *state.Store, opts OpenOptions, sp spec, existingPath st
 		return nil, fmt.Errorf("tmux session %q already belongs to environment %d; pass --session", session, other.ID)
 	}
 
-	wtPath, err := e.worktreePath(sp, project, opts.Wt, existingPath)
+	wtPath, err := e.worktreePath(sp, repoName, opts.Wt, existingPath)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +271,8 @@ func resolveWtPath(override, repoPath string) string {
 
 func (e *Env) renderPlacement(sp spec, project, branch string) (string, error) {
 	return wtpath.Render(e.Cfg.WorktreePath, wtpath.Vars{
-		RepoPath: sp.repoPath, Repo: repoBase(sp.repoPath), Project: project, Owner: sp.owner, Branch: branch,
+		RepoPath: sp.repoPath, Repo: repoBase(sp.repoPath), Project: project, Alias: e.Cfg.AliasFor(project),
+		Owner: sp.owner, Branch: branch,
 	})
 }
 

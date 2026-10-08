@@ -426,6 +426,109 @@ func TestOpenPlainNameCreatesBranch(t *testing.T) {
 	})
 }
 
+// TestOpenThroughAlias covers [aliases]: the alias stands for its
+// repository in --repo and as a plain target, and names the environment,
+// while placement keeps the repository name.
+func TestOpenThroughAlias(t *testing.T) {
+	t.Run("--repo alias names the environment", func(t *testing.T) {
+		fake := &execx.Fake{Responses: newBranchResponses}
+		env, repo := newTestEnv(t, fake)
+		env.Cfg.Aliases = map[string]string{"pj": "proj"}
+
+		res, err := env.Open(OpenOptions{Target: name("spike"), Repo: "pj", NoTerminal: true})
+		if err != nil {
+			t.Fatalf("Open error: %v", err)
+		}
+		wtPath := filepath.Join(env.Cfg.ProjectsPath, "proj.spike")
+		if res.RepoPath != repo || res.Project != "pj" || res.Session != "pj-spike" || res.WorktreePath != wtPath {
+			t.Errorf("res = %+v, want project pj, session pj-spike, worktree %s", res, wtPath)
+		}
+		if rec := loadState(t, env).ByID(res.ID); rec == nil || rec.Project != "pj" {
+			t.Errorf("record = %+v", rec)
+		}
+	})
+
+	t.Run("template variables", func(t *testing.T) {
+		fake := &execx.Fake{Responses: newBranchResponses}
+		env, repo := newTestEnv(t, fake)
+		env.Cfg.Aliases = map[string]string{"pj": "proj"}
+		env.Cfg.WorktreePath = ".worktrees/{{ .alias }}-{{ .project }}"
+
+		res, err := env.Open(OpenOptions{Target: name("spike"), Repo: "pj", NoTerminal: true})
+		if err != nil {
+			t.Fatalf("Open error: %v", err)
+		}
+		if want := filepath.Join(repo, ".worktrees", "pj-proj"); res.WorktreePath != want {
+			t.Errorf("WorktreePath = %q, want %q", res.WorktreePath, want)
+		}
+	})
+
+	t.Run("plain alias opens the default branch", func(t *testing.T) {
+		fake := &execx.Fake{}
+		env, repo := newTestEnv(t, fake)
+		env.Cfg.Aliases = map[string]string{"pj": "proj"}
+		fake.Responses = []execx.FakeResponse{
+			{Prefix: "git symbolic-ref --short refs/remotes/origin/HEAD", Out: "origin/main"},
+			{Prefix: "git worktree list", Out: "worktree " + repo + "\nHEAD abc\nbranch refs/heads/main\n"},
+			{Prefix: "git symbolic-ref --short -q HEAD", Out: "main"},
+			noLiveSession,
+		}
+
+		res, err := env.Open(OpenOptions{Target: name("pj"), NoTerminal: true})
+		if err != nil {
+			t.Fatalf("Open error: %v", err)
+		}
+		if res.WorktreePath != repo || res.Branch != "main" || res.Project != "pj" || res.Session != "pj-main" || !res.Created {
+			t.Errorf("res = %+v", res)
+		}
+	})
+
+	t.Run("an alias renames nothing that exists", func(t *testing.T) {
+		fake := &execx.Fake{}
+		env, repo := newTestEnv(t, fake)
+		seed(t, env, &state.Env{Project: "proj", Branch: "main", TmuxSession: "proj-main", WorktreePath: repo, RepoPath: repo})
+		env.Cfg.Aliases = map[string]string{"pj": "proj"}
+		fake.Responses = []execx.FakeResponse{
+			{Prefix: "git symbolic-ref --short refs/remotes/origin/HEAD", Out: "origin/main"},
+			{Prefix: "git symbolic-ref --short -q HEAD", Out: "main"},
+			noLiveSession,
+		}
+
+		res, err := env.Open(OpenOptions{Target: name("pj"), NoTerminal: true})
+		if err != nil {
+			t.Fatalf("Open error: %v", err)
+		}
+		if res.ID != 1 || res.Created || res.Project != "proj" || res.Session != "proj-main" {
+			t.Errorf("res = %+v, want environment 1 under its old names", res)
+		}
+	})
+
+	t.Run("--repo keeps a plain alias a branch", func(t *testing.T) {
+		fake := &execx.Fake{Responses: newBranchResponses}
+		env, _ := newTestEnv(t, fake)
+		env.Cfg.Aliases = map[string]string{"pj": "proj"}
+
+		res, err := env.Open(OpenOptions{Target: name("pj"), Repo: "proj", NoTerminal: true})
+		if err != nil {
+			t.Fatalf("Open error: %v", err)
+		}
+		if res.Branch != "pj" || res.Session != "pj-pj" {
+			t.Errorf("res = %+v, want branch pj", res)
+		}
+	})
+
+	t.Run("alias of a missing repository", func(t *testing.T) {
+		fake := &execx.Fake{}
+		env, _ := newTestEnv(t, fake)
+		env.Cfg.Aliases = map[string]string{"x": "nosuch"}
+
+		_, err := env.Open(OpenOptions{Target: name("x"), NoTerminal: true})
+		if err == nil || !strings.Contains(err.Error(), "nosuch") {
+			t.Fatalf("expected an error naming the missing repository, got %v", err)
+		}
+	})
+}
+
 // TestOpenExplicitRepoDoesNotFallBackGlobally covers the design spec's
 // "an explicit --repo scopes the search" rule (updated in commit 381e774):
 // unlike a bare plain-name lookup, a --repo that matches no environment

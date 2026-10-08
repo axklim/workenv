@@ -6,7 +6,7 @@ import (
 )
 
 func TestPlacement(t *testing.T) {
-	base := Vars{RepoPath: "/Users/u/projects/trade", Repo: "trade", Project: "trade", Owner: "axklim", Branch: "feat/x"}
+	base := Vars{RepoPath: "/Users/u/projects/trade", Repo: "trade", Project: "trade", Alias: "tr", Owner: "axklim", Branch: "feat/x"}
 
 	tests := []struct {
 		name string
@@ -37,6 +37,12 @@ func TestPlacement(t *testing.T) {
 			tmpl: `{{ .repo_path }}/../{{ if eq .repo ".git" }}x{{ else }}{{ .repo }}{{ end }}`,
 			vars: base,
 			want: func(home string) string { return "/Users/u/projects/trade" },
+		},
+		{
+			name: "TestAlias",
+			tmpl: "~/worktrees/{{ .alias }}/{{ .branch | sanitize }}",
+			vars: base,
+			want: func(home string) string { return filepath.Join(home, "worktrees/tr/feat-x") },
 		},
 		{
 			name: "TestOwnerAndUnsanitizedBranch",

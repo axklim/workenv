@@ -85,8 +85,8 @@ started, so it gets to work without anyone typing; a session that is already
 running is left alone, with a note on stderr.
 
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
-for when you're not standing in it: a bare name is looked up in
-`projects_path`, a path reaches a repository outside it. Other target kinds
+for when you're not standing in it: a bare name is an alias or is looked up
+in `projects_path`, a path reaches a repository outside it. Other target kinds
 carry their own repository.
 
 `we delete <target>` kills the tmux session, removes the worktree and drops
@@ -126,6 +126,11 @@ remote_we     = "we"           # we binary path on remote hosts
 # where new worktrees go — a Go text/template; variables and filters are
 # documented in the design doc
 worktree_path = "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"
+
+# short names for repositories in projects_path: `--repo infra`, `we open
+# infra`, and session infra-<branch> for new environments
+[aliases]
+infra = "simple-dimple-infra"
 ```
 
 The default places worktrees as siblings of the repository:

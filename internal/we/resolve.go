@@ -143,15 +143,21 @@ func (e *Env) resolveRepo(st *state.Store, opts OpenOptions) (*state.Env, bool, 
 	if err != nil {
 		return nil, false, err
 	}
+	return e.openRepo(st, opts, repoPath, t.Owner)
+}
+
+// openRepo finishes on --branch, else the default branch, of repoPath.
+func (e *Env) openRepo(st *state.Store, opts OpenOptions, repoPath, owner string) (*state.Env, bool, error) {
 	branch := opts.Branch
 	if branch == "" {
+		var err error
 		branch, err = e.git().DefaultBranch(repoPath)
 		if err != nil {
 			return nil, false, err
 		}
 	}
-	sp := spec{repoPath: repoPath, owner: t.Owner, branch: branch}
-	return e.finish(st, opts, sp, t)
+	sp := spec{repoPath: repoPath, owner: owner, branch: branch}
+	return e.finish(st, opts, sp, opts.Target)
 }
 
 // resolvePlain implements the design spec's plain-string resolution: an id,
@@ -159,7 +165,9 @@ func (e *Env) resolveRepo(st *state.Store, opts OpenOptions) (*state.Env, bool, 
 // --repo). With no explicit --repo, a unique match anywhere is also a hit;
 // an explicit --repo scopes the search to that repository — the same flag
 // means the same thing here as it does for delete. open creates on that
-// branch (or --branch) in the cwd's or --repo's repository.
+// branch (or --branch) in the cwd's or --repo's repository — unless,
+// without --repo, the string is an alias: then it is that repository,
+// opened like its URL.
 func (e *Env) resolvePlain(st *state.Store, opts OpenOptions) (*state.Env, bool, error) {
 	raw := opts.Target.Name
 	if id, err := strconv.Atoi(raw); err == nil {
@@ -191,9 +199,17 @@ func (e *Env) resolvePlain(st *state.Store, opts OpenOptions) (*state.Env, bool,
 		case 1:
 			return matches[0], false, nil
 		case 0:
-			// fall through to attach-error or create
+			// fall through to an alias, attach-error or create
 		default:
 			return nil, false, ambiguous(raw, matches)
+		}
+		if _, ok := e.Cfg.Aliases[raw]; ok {
+			aliasPath, err := e.repoFromFlag(raw)
+			if err != nil {
+				return nil, false, err
+			}
+			owner, _, _ := e.git().OriginGitHubRepo(aliasPath)
+			return e.openRepo(st, opts, aliasPath, owner)
 		}
 	}
 
@@ -337,9 +353,10 @@ func (e *Env) repoForTarget(t target.Target, attachOnly bool) (string, error) {
 }
 
 // repoFromFlag resolves --repo (or, when empty, the cwd) to a repository
-// path. An empty result with a nil error means neither applies — a
-// legitimate outcome for a plain-name lookup that does not need a
-// repository; the caller decides whether that is fatal.
+// path; a bare name goes through the aliases before projects_path. An
+// empty result with a nil error means neither applies — a legitimate
+// outcome for a plain-name lookup that does not need a repository; the
+// caller decides whether that is fatal.
 func (e *Env) repoFromFlag(repo string) (string, error) {
 	if repo == "" {
 		return e.git().RepoRoot(e.Cwd), nil
@@ -351,8 +368,15 @@ func (e *Env) repoFromFlag(repo string) (string, error) {
 		}
 		return root, nil
 	}
-	dir, ok := gitx.FindProjectDir(e.Cfg.ProjectsPath, repo)
+	name := repo
+	if aliased, ok := e.Cfg.Aliases[repo]; ok {
+		name = aliased
+	}
+	dir, ok := gitx.FindProjectDir(e.Cfg.ProjectsPath, name)
 	if !ok {
+		if name != repo {
+			return "", fmt.Errorf("alias %s: repository %q not found in %s", repo, name, e.Cfg.ProjectsPath)
+		}
 		return "", fmt.Errorf("repository %q not found in %s", repo, e.Cfg.ProjectsPath)
 	}
 	return dir, nil

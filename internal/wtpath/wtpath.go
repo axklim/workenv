@@ -1,5 +1,5 @@
 // Package wtpath renders the location of a worktree from a Go template
-// (repo_path, repo, project, owner, branch, and a sanitize filter).
+// (repo_path, repo, project, alias, owner, branch, and a sanitize filter).
 package wtpath
 
 import (
@@ -22,6 +22,7 @@ type Vars struct {
 	RepoPath string
 	Repo     string
 	Project  string
+	Alias    string
 	Owner    string
 	Branch   string
 }
@@ -43,6 +44,7 @@ func Render(tmpl string, v Vars) (string, error) {
 		"repo_path": v.RepoPath,
 		"repo":      v.Repo,
 		"project":   v.Project,
+		"alias":     v.Alias,
 		"owner":     v.Owner,
 		"branch":    v.Branch,
 	}
