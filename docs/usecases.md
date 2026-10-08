@@ -89,7 +89,8 @@ we open infra
 The first is branch `review` in `~/projects/simple-dimple-infra`: session
 `infra-review`, worktree `~/projects/simple-dimple-infra.review` (the path
 keeps the repository name; a `worktree_path` template can use `{{ .alias }}`).
-The second is the project home on the default branch, session `infra-main`.
+The second is the project home on the default branch, session `infra-main`;
+`we attach infra`, `we show infra` and `we delete infra` reach it too.
 Environments made before the alias keep their `simple-dimple-infra-…` names.
 
 ### Start a branch with no issue behind it

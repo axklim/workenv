@@ -259,18 +259,25 @@ func ambiguous(raw string, matches []*state.Env) error {
 	return fmt.Errorf("branch %q exists in multiple environments (%s); pass --repo", raw, strings.Join(ids, ", "))
 }
 
-// lookupRegistry finds an environment for t using the registry only —
-// delete and show never query GitHub or clone. For an issue, PR or
-// repository-URL target, repo is ignored (the target carries its own
-// repository). For a plain id, session or branch, repo behaves like
-// --repo: it scopes a branch lookup and, when given explicitly, disables
-// the global unique-branch fallback (an explicit --repo that names no
-// matching environment is simply "not found" there, not a reason to look
-// elsewhere).
+// lookupRegistry finds an environment for t using the registry and local
+// git only — delete and show never query GitHub or clone. For an issue, PR
+// or repository-URL target, repo is ignored (the target carries its own
+// repository); a repository URL, like an alias, means the environment on
+// that repository's default branch. For a plain id, session or branch,
+// repo behaves like --repo: it scopes a branch lookup and, when given
+// explicitly, disables the global unique-branch fallback and the alias (an
+// explicit --repo that names no matching environment is simply "not found"
+// there, not a reason to look elsewhere).
 func (e *Env) lookupRegistry(st *state.Store, t target.Target, repo string) (*state.Env, error) {
 	switch t.Kind {
-	case target.KindIssue, target.KindPR, target.KindRepo:
+	case target.KindIssue, target.KindPR:
 		return st.ByRef(t.URL()), nil
+	case target.KindRepo:
+		repoPath, err := e.repoForTarget(t, true)
+		if err != nil {
+			return nil, nil
+		}
+		return e.onDefaultBranch(st, repoPath)
 	}
 	raw := t.Name
 	if id, err := strconv.Atoi(raw); err == nil {
@@ -298,12 +305,29 @@ func (e *Env) lookupRegistry(st *state.Store, t target.Target, repo string) (*st
 	matches := st.Matching(func(x *state.Env) bool { return x.Branch == raw })
 	switch len(matches) {
 	case 0:
-		return nil, nil
 	case 1:
 		return matches[0], nil
 	default:
 		return nil, ambiguous(raw, matches)
 	}
+	if _, ok := e.Cfg.Aliases[raw]; !ok {
+		return nil, nil
+	}
+	aliasPath, err := e.repoFromFlag(raw)
+	if err != nil {
+		return nil, err
+	}
+	return e.onDefaultBranch(st, aliasPath)
+}
+
+// onDefaultBranch is the registry's environment on repoPath's default
+// branch, if any; the branch comes from local git, never GitHub.
+func (e *Env) onDefaultBranch(st *state.Store, repoPath string) (*state.Env, error) {
+	branch, err := e.git().DefaultBranch(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	return st.ByBranch(repoPath, branch), nil
 }
 
 // finish resolves a fully specified target: an environment already on that

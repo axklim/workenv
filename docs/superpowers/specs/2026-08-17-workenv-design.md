@@ -138,8 +138,10 @@ accepted. One repository has at most one alias. The alias:
 
 - stands for the repository in `--repo infra`, looked up in the table before
   `projects_path` is searched;
-- is a target of its own: `we open infra` opens the repository like its URL
-  (see *Resolution*);
+- is a target of its own wherever a target is taken: `we open infra` and
+  `we attach infra` open the repository like its URL (see *Resolution*),
+  and `we show infra` / `we delete infra` find its environment on the
+  default branch, as they do for the URL (see *delete*);
 - is the project name of every environment created in that repository,
   whatever target created it: session `infra-review`, `PROJECT` column
   `infra`, `project` in `--json`.
@@ -148,6 +150,10 @@ The worktree path keeps the real repository name (`.repo`, `.project`); a
 template that wants the alias uses `.alias`. Since names are stored, not
 derived, an environment created before its alias keeps its names — adding,
 changing or removing an alias never renames anything.
+
+With `--host`, the target and `--repo` travel to the remote host verbatim,
+so aliases resolve there with the remote host's own table — like
+`remote_control`, the config of the `we` doing the work applies.
 
 ## Placement
 
@@ -350,9 +356,13 @@ name; for an environment that already exists, `--session` cannot help — the
 message names the conflict and points at renaming or killing the other
 session, or `we delete <id>`.
 
-**delete** resolves through the registry only. It kills the session, removes
-the worktree (`--force` when dirty; a directory that is already gone is just
-pruned), optionally deletes the branch, and drops the record.
+**delete** resolves through the registry and local git only — never GitHub,
+never a clone. A repository URL or an alias means the environment on that
+repository's default branch (`origin/HEAD` read locally), found by branch in
+the registry; a repository that is not on disk has no environment. It kills
+the session, removes the worktree (`--force` when dirty; a directory that
+is already gone is just pruned), optionally deletes the branch, and drops
+the record.
 `--keep-worktree` kills the session and keeps everything else. A target that
 is not in the registry but names a live `@workenv`-tagged session gets that
 session killed.
@@ -402,8 +412,9 @@ ID  PROJECT  SESSION                                       STATE              RE
 - The environment containing the current directory is marked.
 - Colour and hyperlinks are suppressed when stdout is not a terminal or
   `NO_COLOR` is set.
-- `-l` and `we show <target>` print the stacked form instead: branch, full
-  issue and PR URLs, repository directory, creation time.
+- `-l` and `we show <target>` (resolved like *delete*) print the stacked
+  form instead: branch, full issue and PR URLs, repository directory,
+  creation time.
 - `--json` prints the stacked form's facts for an agent to read: a JSON array,
   one object per environment, `[]` when there are none. Keys are stable:
   `id`, `project`, `branch`, `session`, `state` (without the command),
@@ -465,10 +476,11 @@ runner, asserting exact argv and the persisted registry:
   from the config or `--rc` and with an initial prompt; a prompt ignored by
   a live session; branch drift; placement
   (default template, a custom `worktree_path`, `--wt` name and path);
-  delete semantics; aliases in `--repo` and as a target, naming a new
-  environment but leaving an existing one's names and the worktree path
-  alone; gc collecting only finished environments, `--dry-run`,
-  failing without `gh` before touching anything, and `ls` marking `done`
+  delete semantics; aliases in `--repo` and as a target of open, attach,
+  show and delete, naming a new environment but leaving an existing one's
+  names and the worktree path alone; show and delete by repository URL
+  without GitHub or a clone; gc collecting only finished environments,
+  `--dry-run`, failing without `gh` before touching anything, and `ls` marking `done`
   and staying usable without `gh`.
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails

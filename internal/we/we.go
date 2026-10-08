@@ -487,18 +487,12 @@ func (e *Env) killStray(t target.Target) (string, error) {
 	return "", notFoundInRegistry(t)
 }
 
-// notFoundInRegistry is delete's and show's "nothing matched" message. A
-// repository-URL target gets a more specific explanation: unlike an issue
-// or PR URL, it was never a lookup key recorded on any environment, so it
-// can never resolve to one.
+// notFoundInRegistry is delete's and show's "nothing matched" message.
 func notFoundInRegistry(t target.Target) error {
-	if t.Kind == target.KindRepo {
-		return fmt.Errorf("a repository URL does not identify a single environment; pass its id, session or branch")
-	}
 	return fmt.Errorf("no work environment for %s", t.String())
 }
 
-// Show resolves like Delete — the registry only — and reports the same
+// Show resolves like Delete — the registry and local git only — and reports the same
 // Item List would for that environment.
 func (e *Env) Show(t target.Target, repo string) (Item, error) {
 	st, err := state.Load(e.StatePath)
