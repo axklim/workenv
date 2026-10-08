@@ -67,6 +67,10 @@ type OpenOptions struct {
 	// whatever the config says. It only matters when the session is
 	// started: a session that is already live keeps the claude it runs.
 	RemoteControl bool
+	// Prompt is passed to claude as its first prompt when the session is
+	// started; a session that is already live is reported back instead
+	// (OpenResult.PromptIgnored).
+	Prompt string
 }
 
 type OpenResult struct {
@@ -75,6 +79,7 @@ type OpenResult struct {
 	WorktreePath, RepoPath   string
 	Created                  bool
 	IgnoredOverrides         []string // e.g. ["--branch", "--wt"]
+	PromptIgnored            bool     // the session was already live
 }
 
 type DeleteOptions struct {
@@ -110,7 +115,8 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	if err != nil {
 		return OpenResult{}, err
 	}
-	if err := e.repair(env, created, opts.RemoteControl || e.Cfg.RemoteControl); err != nil {
+	started, err := e.repair(env, created, opts.RemoteControl || e.Cfg.RemoteControl, opts.Prompt)
+	if err != nil {
 		return OpenResult{}, err
 	}
 	if err := st.Save(); err != nil {
@@ -128,7 +134,7 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	return OpenResult{
 		ID: env.ID, Project: env.Project, Branch: env.Branch, Session: env.TmuxSession,
 		WorktreePath: env.WorktreePath, RepoPath: env.RepoPath, Created: created,
-		IgnoredOverrides: ignored,
+		IgnoredOverrides: ignored, PromptIgnored: opts.Prompt != "" && !started,
 	}, nil
 }
 
@@ -260,19 +266,20 @@ func (e *Env) renderPlacement(sp spec, project, branch string) (string, error) {
 // what actually materialises them. created selects which of the two
 // Adoption refusal messages repairSession gives on a session-name conflict:
 // --session still helps on a fresh creation, but cannot on a hit.
-// remoteControl decides whether a session it starts runs claude with
-// Remote Control.
-func (e *Env) repair(env *state.Env, created, remoteControl bool) error {
+// remoteControl and prompt shape the claude a session it starts runs;
+// started reports whether it started one.
+func (e *Env) repair(env *state.Env, created, remoteControl bool, prompt string) (started bool, err error) {
 	if err := e.repairWorktree(env); err != nil {
-		return err
+		return false, err
 	}
-	if err := e.repairSession(env, created, remoteControl); err != nil {
-		return err
+	started, err = e.repairSession(env, created, remoteControl, prompt)
+	if err != nil {
+		return false, err
 	}
 	if b := e.git().CurrentBranch(env.WorktreePath); b != "" {
 		env.Branch = b
 	}
-	return nil
+	return started, nil
 }
 
 // repairWorktree re-adds env's worktree when its directory is missing. When
@@ -302,33 +309,37 @@ func (e *Env) repairWorktree(env *state.Env) error {
 // helps; for an environment that already exists, --session cannot change
 // anything (it is a creation-only override, ignored on a hit), so the
 // message instead points at the conflicting session itself.
-func (e *Env) repairSession(env *state.Env, created, remoteControl bool) error {
+func (e *Env) repairSession(env *state.Env, created, remoteControl bool, prompt string) (started bool, err error) {
 	if e.tmux().Has(env.TmuxSession) {
 		if !e.tmux().IsWorkenv(env.TmuxSession) {
 			if created {
-				return fmt.Errorf("tmux session %q already exists and is not a workenv session; pass --session", env.TmuxSession)
+				return false, fmt.Errorf("tmux session %q already exists and is not a workenv session; pass --session", env.TmuxSession)
 			}
-			return fmt.Errorf("tmux session %q (environment %d) is taken by a session we does not own; rename or kill it, or run `we delete %d`", env.TmuxSession, env.ID, env.ID)
+			return false, fmt.Errorf("tmux session %q (environment %d) is taken by a session we does not own; rename or kill it, or run `we delete %d`", env.TmuxSession, env.ID, env.ID)
 		}
-		return nil
+		return false, nil
 	}
 	if err := e.tmux().New(env.TmuxSession, env.WorktreePath, env.ID); err != nil {
-		return err
+		return false, err
 	}
-	return e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, remoteControl))
+	return true, e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, remoteControl, prompt))
 }
 
 // claudeCommand is cmd with --name <session> appended and, when
 // remoteControl, --remote-control <session> as well, so the name claude
 // shows and the name it is reachable under both match the tmux session. A
-// cmd that already passes either flag keeps its own value for it.
-func claudeCommand(cmd, session string, remoteControl bool) string {
+// cmd that already passes either flag keeps its own value for it. A
+// non-empty prompt goes last, shell-quoted, as claude's positional prompt.
+func claudeCommand(cmd, session string, remoteControl bool, prompt string) string {
 	name := naming.Sanitize(session)
 	if !hasFlag(cmd, "-n", "--name") {
 		cmd += " --name " + name
 	}
 	if remoteControl && !hasFlag(cmd, "--remote-control") {
 		cmd += " --remote-control " + name
+	}
+	if prompt != "" {
+		cmd += " " + execx.ShellQuote(prompt)
 	}
 	return cmd
 }

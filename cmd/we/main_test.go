@@ -37,12 +37,12 @@ func parse(t *testing.T, args ...string) (options, string) {
 // inside openCmd) are actually reached by go-flags' reflection — a silent
 // wiring failure there would leave every flag at its zero value.
 func TestParseAcceptsFlagsAroundTarget(t *testing.T) {
-	opts, name := parse(t, "open", "--branch", "b", "7", "--wt", "/tmp/wt", "--repo", "trade", "--no-terminal", "--rc")
+	opts, name := parse(t, "open", "--branch", "b", "7", "--wt", "/tmp/wt", "--repo", "trade", "--no-terminal", "--rc", "--prompt", "fix it")
 	if name != "open" {
 		t.Fatalf("active command = %q, want \"open\"", name)
 	}
 	o := opts.Open
-	if o.Args.Target != "7" || o.Branch != "b" || o.Wt != "/tmp/wt" || o.Repo != "trade" || !o.NoTerminal || !o.RC {
+	if o.Args.Target != "7" || o.Branch != "b" || o.Wt != "/tmp/wt" || o.Repo != "trade" || !o.NoTerminal || !o.RC || o.Prompt != "fix it" {
 		t.Errorf("open parsed as %+v", o)
 	}
 }
@@ -87,7 +87,7 @@ func TestRunOpenStartsClaudeWithRemoteControl(t *testing.T) {
 // creation overrides are "rejected there rather than silently ignored":
 // attach does not define them, so passing one is a parse error.
 func TestAttachRejectsCreationOverrides(t *testing.T) {
-	for _, flag := range []string{"--branch", "--session", "--wt"} {
+	for _, flag := range []string{"--branch", "--session", "--wt", "--prompt"} {
 		var opts options
 		_, err := newParser(&opts).ParseArgs([]string{"attach", "7", flag, "x"})
 		if err == nil {
@@ -148,7 +148,7 @@ func TestOpenRemoteUsesOutputPassStderr(t *testing.T) {
 	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
 
 	// noTerminal:true keeps this to the one ssh call — no local AttachRemote.
-	if err := openRemote(env, "open", "devbox", "7", "", "", "", "", false, true); err != nil {
+	if err := openRemote(env, "open", "devbox", "7", "", "", "", "", false, "", true); err != nil {
 		t.Fatalf("openRemote: %v", err)
 	}
 
@@ -167,20 +167,21 @@ func TestOpenRemoteUsesOutputPassStderr(t *testing.T) {
 
 // TestOpenRemotePassesThroughOverridesInOrder checks the documented
 // pass-through order survives the switch to OutputPassStderr: --no-terminal
-// first, then whichever of --repo, --branch, --session, --wt, --rc were
-// given. --rc rides along because the remote's claude is the one that has
-// to be reachable, and it is the remote we that starts it.
+// first, then whichever of --repo, --branch, --session, --wt, --rc,
+// --prompt were given. --rc and --prompt ride along because it is the
+// remote we that starts claude. ssh hands the remote shell one joined
+// string, so the prompt travels shell-quoted.
 func TestOpenRemotePassesThroughOverridesInOrder(t *testing.T) {
 	fake := &execx.Fake{Responses: []execx.FakeResponse{
 		{Prefix: "ssh devbox we open feature-1", Out: "created environment 9\nWE_SESSION=trade-feature-1\n"},
 	}}
 	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
 
-	err := openRemote(env, "open", "devbox", "feature-1", "trade", "feature-1", "sess", "~/wt", true, true)
+	err := openRemote(env, "open", "devbox", "feature-1", "trade", "feature-1", "sess", "~/wt", true, "don't stop", true)
 	if err != nil {
 		t.Fatalf("openRemote: %v", err)
 	}
-	want := "ssh devbox we open feature-1 --no-terminal --repo trade --branch feature-1 --session sess --wt ~/wt --rc"
+	want := `ssh devbox we open feature-1 --no-terminal --repo trade --branch feature-1 --session sess --wt ~/wt --rc --prompt 'don'\''t stop'`
 	if got := strings.Join(fake.Calls[0].Argv, " "); got != want {
 		t.Errorf("argv = %q, want %q", got, want)
 	}

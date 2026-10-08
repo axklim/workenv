@@ -60,3 +60,9 @@ func (Real) Run(dir, name string, args ...string) error {
 	}
 	return nil
 }
+
+// ShellQuote returns s as a single POSIX shell word: single-quoted, with
+// each embedded single quote closed, escaped and reopened.
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}

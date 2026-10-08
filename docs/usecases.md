@@ -13,6 +13,7 @@ Worked examples, in the order a day tends to go. Paths assume
 - [Placement and cleanup](#placement-and-cleanup) — one-off paths, tearing down
 - [On another machine](#on-another-machine) — `--host`
 - [From another device](#from-another-device) — `--rc`
+- [Handing work to a new session](#handing-work-to-a-new-session) — `--prompt`
 
 ## Starting work
 
@@ -175,3 +176,17 @@ Control list of a phone or laptop, with no terminal attached here. A session
 started by another agent on this machine can be picked up that way. Set
 `remote_control = true` to do it for every environment; `--rc` only matters
 when the session is started, so a live one is left as it is.
+
+## Handing work to a new session
+
+```
+we open https://github.com/axklim/trade/issues/59 --no-terminal \
+  --prompt "Implement issue 59 and open a PR"
+```
+
+`claude` starts with the text as its first prompt and gets to work at once,
+which is how one agent dispatches a task to another. The text is shell-quoted
+before it is typed into tmux, so quotes and `$` in it arrive as written. It
+only reaches a session that `open` starts: if the session is already
+running, nothing is typed into it and `open` says on stderr that `--prompt`
+was ignored.
