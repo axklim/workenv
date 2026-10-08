@@ -23,6 +23,8 @@ type Config struct {
 	ClaudeCmd string
 	// RemoteWe is the path of the we binary on remote hosts.
 	RemoteWe string
+	// RemoteControl also starts claude with --remote-control <session>.
+	RemoteControl bool
 }
 
 // Path returns the config file location following XDG notation.
@@ -81,6 +83,15 @@ func parse(raw, home string) (Config, error) {
 			cfg.ClaudeCmd = val
 		case "remote_we":
 			cfg.RemoteWe = val
+		case "remote_control":
+			switch val {
+			case "true":
+				cfg.RemoteControl = true
+			case "false":
+				cfg.RemoteControl = false
+			default:
+				return Config{}, fmt.Errorf("config line %d: %s must be true or false, got %q", i+1, key, val)
+			}
 		case "projects_dir", "worktrees_dir":
 			return Config{}, fmt.Errorf("config line %d: key %q is retired (use %q instead)", i+1, key, retiredKeyMap[key])
 		default:

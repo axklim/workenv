@@ -70,6 +70,7 @@ type attachCmd struct {
 type openCmd struct {
 	attachCmd
 	overrides
+	RC bool `long:"rc" description:"start claude with Remote Control, named after the session (overrides remote_control)"`
 }
 
 // overrides are the creation-only flags: they decide what a new environment
@@ -146,6 +147,8 @@ Config (XDG): ~/.config/workenv/config.toml
   worktree_path = "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"
   claude_cmd    = "claude"       command run in the first tmux window,
                                  with --name <session> appended
+  remote_control = false         also append --remote-control <session>;
+                                 --rc does it for one open
   remote_we     = "we"           we binary path on remote hosts
 
 State (XDG): ~/.local/state/workenv/envs.json
@@ -212,9 +215,9 @@ func run(args []string) error {
 	}
 	switch p.Active.Name {
 	case "open":
-		return runOpen(env, "open", opts.Open.attachCmd, opts.Open.overrides, false)
+		return runOpen(env, "open", opts.Open, false)
 	case "attach":
-		return runOpen(env, "attach", opts.Attach, overrides{}, true)
+		return runOpen(env, "attach", openCmd{attachCmd: opts.Attach}, true)
 	case "list":
 		return runList(env, opts.List)
 	case "show":
@@ -274,8 +277,9 @@ func renderOptsFromEnv() renderOpts {
 }
 
 // runOpen serves both open (find or create) and attach (find only); the two
-// differ in attachOnly and in attach having no creation overrides to pass.
-func runOpen(env *we.Env, cmd string, c attachCmd, ov overrides, attachOnly bool) error {
+// differ in attachOnly and in attach arriving as a bare attachCmd, with
+// open's own flags at their zero values.
+func runOpen(env *we.Env, cmd string, c openCmd, attachOnly bool) error {
 	raw := c.Args.Target
 	tgt, err := target.Parse(raw)
 	if err != nil {
@@ -283,12 +287,12 @@ func runOpen(env *we.Env, cmd string, c attachCmd, ov overrides, attachOnly bool
 	}
 
 	if c.Host != "" {
-		return openRemote(env, cmd, c.Host, raw, c.Repo, ov.Branch, ov.Session, ov.Wt, c.NoTerminal)
+		return openRemote(env, cmd, c.Host, raw, c.Repo, c.Branch, c.Session, c.Wt, c.RC, c.NoTerminal)
 	}
 
 	res, err := env.Open(we.OpenOptions{
-		Target: tgt, Repo: c.Repo, Branch: ov.Branch, Session: ov.Session, Wt: ov.Wt,
-		AttachOnly: attachOnly, NoTerminal: c.NoTerminal,
+		Target: tgt, Repo: c.Repo, Branch: c.Branch, Session: c.Session, Wt: c.Wt,
+		AttachOnly: attachOnly, NoTerminal: c.NoTerminal, RemoteControl: c.RC,
 	})
 	if err != nil {
 		return err
@@ -318,9 +322,9 @@ func printOpenResult(res we.OpenResult) {
 }
 
 // openRemote runs open/attach on host over ssh — --no-terminal first, then
-// whichever of --repo, --branch, --session, --wt were given, in that order
-// — prints what it printed, and attaches a local terminal to the resulting
-// session unless noTerminal was requested locally too.
+// whichever of --repo, --branch, --session, --wt, --rc were given, in that
+// order — prints what it printed, and attaches a local terminal to the
+// resulting session unless noTerminal was requested locally too.
 //
 // It uses OutputPassStderr rather than Output: stdout must be captured so
 // the WE_SESSION= marker can be parsed out of it, but the remote's stderr
@@ -328,7 +332,7 @@ func printOpenResult(res we.OpenResult) {
 // — has to reach the user directly. Output only surfaces stderr inside the
 // error it returns, so on a successful (non-error) remote call that note
 // would otherwise be silently dropped.
-func openRemote(env *we.Env, cmd, host, rawTarget, repo, branch, session, wt string, noTerminal bool) error {
+func openRemote(env *we.Env, cmd, host, rawTarget, repo, branch, session, wt string, rc, noTerminal bool) error {
 	remote := []string{host, env.Cfg.RemoteWe, cmd, rawTarget, "--no-terminal"}
 	if repo != "" {
 		remote = append(remote, "--repo", repo)
@@ -341,6 +345,9 @@ func openRemote(env *we.Env, cmd, host, rawTarget, repo, branch, session, wt str
 	}
 	if wt != "" {
 		remote = append(remote, "--wt", wt)
+	}
+	if rc {
+		remote = append(remote, "--rc")
 	}
 	out, err := env.R.OutputPassStderr("", "ssh", remote...)
 	if out != "" {
