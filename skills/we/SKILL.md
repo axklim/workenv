@@ -83,10 +83,9 @@ we open https://github.com/OWNER/trade/issues/59 --no-terminal --rc \
 branch, worktree, session and a `WE_SESSION=<session>` line. Read the session
 name from there rather than deriving it.
 
-**Versions.** `--rc`, `--prompt`, `remote_control` and `gc` are on `main` and in no
-release through 0.1.3; the next release carries them. Everything else here is
-in 0.1.3. `we version` says which you have, `we open --help` which flags it
-knows.
+**Versions.** `--rc`, `--prompt`, `remote_control`, `ls --json`, the claude
+state in `ls`, `gc` and `[aliases]` arrived in 0.2.0; everything else here is
+older. `we version` says which you have, `we open --help` which flags it knows.
 
 ## Reading back
 
