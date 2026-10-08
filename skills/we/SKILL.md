@@ -97,7 +97,8 @@ and a `dir:` line. `STATE` comes from tmux and says nothing about claude:
 `(missing)` after `dir:` means the worktree is gone; the next `open` or
 `attach` re-adds it. Both repair; only `open` creates. `*` marks the environment the cwd is in. `we ls -l` and `we show <target>`
 print the stacked form with full issue and PR URLs, repository path and
-creation time.
+creation time. To read state, prefer `we ls --json`: a JSON array with stable
+keys (`id`, `session`, `state`, `worktree_path`, `worktree_missing`, `prs`, …).
 
 The registry (`~/.local/state/workenv/envs.json`) knows: id, project, branch,
 session name, worktree and repository path, linked issue and PR URLs, creation

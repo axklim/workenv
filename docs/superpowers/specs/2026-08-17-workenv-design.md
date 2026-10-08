@@ -257,7 +257,7 @@ worktree gets its own environment. A worktree can only be on one branch.
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
                    [--rc] [--prompt TEXT] [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
-we ls     [-l] [--host H]
+we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
 we delete <target> [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
@@ -343,6 +343,12 @@ ID  PROJECT  SESSION                                       STATE     REFS
   `NO_COLOR` is set.
 - `-l` and `we show <target>` print the stacked form instead: branch, full
   issue and PR URLs, repository directory, creation time.
+- `--json` prints the stacked form's facts for an agent to read: a JSON array,
+  one object per environment, `[]` when there are none. Keys are stable:
+  `id`, `project`, `branch`, `session`, `state`, `worktree_path`,
+  `worktree_missing`, `repo_path`, `issues`, `prs` (both always arrays),
+  `created_at` (RFC 3339). Paths are absolute, not `~`-abbreviated. `-l` has
+  no effect with it.
 
 ## Remote hosts
 
@@ -352,7 +358,7 @@ shell-quoted, since ssh joins its arguments into one remote command line —
 parses the `WE_SESSION=` marker, and opens a local Ghostty running `ssh -t
 devbox tmux attach-session -t <session>`. `remote_control` is read from the remote host's config, since
 that is the `we` starting claude.
-`ls`, `show` and `delete` pass through unchanged. The remote host needs `we`
+`ls` (with `-l` and `--json`), `show` and `delete` pass through unchanged. The remote host needs `we`
 installed; its path is `remote_we`.
 
 ## Configuration
@@ -391,7 +397,8 @@ runner, asserting exact argv and the persisted registry:
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails
   to parse or render.
-- **cmd** — listing layout, TTY vs piped rendering, `show`.
+- **cmd** — listing layout, TTY vs piped rendering, `show`, the `--json`
+  keys and the empty array.
 
 ## Use cases
 

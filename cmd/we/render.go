@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -216,4 +217,46 @@ func dirWorktree(it we.Item) string {
 		v += " (missing)"
 	}
 	return v
+}
+
+// jsonItem is one element of `ls --json`: the stacked form's facts under
+// stable snake_case names. Paths are absolute, not ~-abbreviated, and
+// issues/prs are always arrays.
+type jsonItem struct {
+	ID              int       `json:"id"`
+	Project         string    `json:"project"`
+	Branch          string    `json:"branch"`
+	Session         string    `json:"session"`
+	State           string    `json:"state"`
+	WorktreePath    string    `json:"worktree_path"`
+	WorktreeMissing bool      `json:"worktree_missing"`
+	RepoPath        string    `json:"repo_path"`
+	Issues          []string  `json:"issues"`
+	PRs             []string  `json:"prs"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// renderJSON prints `ls --json`: a JSON array with one object per item,
+// [] when there are none.
+func renderJSON(w io.Writer, items []we.Item) error {
+	out := make([]jsonItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, jsonItem{
+			ID: it.ID, Project: it.Project, Branch: it.Branch, Session: it.Session,
+			State: it.SessionState, WorktreePath: it.WorktreePath, WorktreeMissing: !it.Exists,
+			RepoPath: it.RepoPath, Issues: nonNil(it.Issues), PRs: nonNil(it.PRs),
+			CreatedAt: it.CreatedAt,
+		})
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

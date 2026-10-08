@@ -86,6 +86,7 @@ type overrides struct {
 type listCmd struct {
 	hostOpt
 	Long bool `short:"l" long:"long" description:"print the stacked form"`
+	JSON bool `long:"json" description:"print a JSON array, one object per environment (-l has no effect)"`
 }
 
 type showCmd struct {
@@ -145,6 +146,7 @@ Examples:
   we open feature-123 --repo trade
   we attach 7
   we ls -l
+  we ls --json
   we delete 7 --delete-branch
 
 Config (XDG): ~/.config/workenv/config.toml
@@ -397,11 +399,17 @@ func runList(env *we.Env, c listCmd) error {
 		if c.Long {
 			remote = append(remote, "-l")
 		}
+		if c.JSON {
+			remote = append(remote, "--json")
+		}
 		return env.R.Run("", "ssh", remote...)
 	}
 	items, err := env.List()
 	if err != nil {
 		return err
+	}
+	if c.JSON {
+		return renderJSON(os.Stdout, items)
 	}
 	if len(items) == 0 {
 		fmt.Println("no work environments")
