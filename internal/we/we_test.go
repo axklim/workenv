@@ -1423,21 +1423,69 @@ func TestShowResolvesLikeDelete(t *testing.T) {
 	}
 }
 
-// TestShowAndDeleteRepoURLGiveHelpfulError covers the case a repository URL
-// can never resolve for show/delete (there is no field on a record it
-// could match): the message should say why, not just "no work
-// environment for owner/repo" as if a record with that URL could exist.
-func TestShowAndDeleteRepoURLGiveHelpfulError(t *testing.T) {
-	fake := &execx.Fake{}
-	env, _ := newTestEnv(t, fake)
+// TestShowAndDeleteByRepoURLAndAlias covers show's and delete's lookup of
+// a repository URL or an alias: the environment on the default branch, from
+// the registry and local git, never GitHub or a clone.
+func TestShowAndDeleteByRepoURLAndAlias(t *testing.T) {
+	newHome := func(t *testing.T) (*Env, *execx.Fake) {
+		fake := &execx.Fake{}
+		env, repo := newTestEnv(t, fake)
+		env.Cfg.Aliases = map[string]string{"pj": "proj", "gone": "nosuch"}
+		seed(t, env, &state.Env{Project: "proj", Branch: "main", TmuxSession: "proj-main", WorktreePath: repo, RepoPath: repo})
+		fake.Responses = []execx.FakeResponse{
+			{Prefix: "git symbolic-ref --short refs/remotes/origin/HEAD", Out: "origin/main"},
+			noLiveSession,
+		}
+		return env, fake
+	}
 
-	want := "pass its id, session or branch"
-	if _, err := env.Show(repoURL("acme", "proj"), ""); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("Show: expected an error containing %q, got %v", want, err)
-	}
-	if _, _, err := env.Delete(repoURL("acme", "proj"), "", DeleteOptions{}); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("Delete: expected an error containing %q, got %v", want, err)
-	}
+	t.Run("show", func(t *testing.T) {
+		env, _ := newHome(t)
+		for _, tgt := range []target.Target{repoURL("acme", "proj"), name("pj")} {
+			it, err := env.Show(tgt, "")
+			if err != nil || it.ID != 1 {
+				t.Errorf("Show(%s) = %d, %v; want environment 1", tgt, it.ID, err)
+			}
+		}
+	})
+
+	t.Run("delete by alias", func(t *testing.T) {
+		env, _ := newHome(t)
+		id, _, err := env.Delete(name("pj"), "", DeleteOptions{})
+		if err != nil || id != 1 {
+			t.Fatalf("Delete = %d, %v; want environment 1", id, err)
+		}
+		if len(loadState(t, env).Envs) != 0 {
+			t.Error("the record must be dropped")
+		}
+	})
+
+	t.Run("delete by repository URL", func(t *testing.T) {
+		env, _ := newHome(t)
+		if id, _, err := env.Delete(repoURL("acme", "proj"), "", DeleteOptions{}); err != nil || id != 1 {
+			t.Fatalf("Delete = %d, %v; want environment 1", id, err)
+		}
+	})
+
+	t.Run("missing repository is not found and never cloned", func(t *testing.T) {
+		env, fake := newHome(t)
+		if _, err := env.Show(repoURL("acme", "nosuch"), ""); err == nil || !strings.Contains(err.Error(), "no work environment") {
+			t.Errorf("Show(repo URL) error = %v, want not found", err)
+		}
+		if _, err := env.Show(name("gone"), ""); err == nil || !strings.Contains(err.Error(), "nosuch") {
+			t.Errorf("Show(alias) error = %v, want the missing repository named", err)
+		}
+		if hasCall(fake, "gh") {
+			t.Errorf("show must not call gh:\n%s", strings.Join(fake.Joined(), "\n"))
+		}
+	})
+
+	t.Run("--repo alias scopes delete", func(t *testing.T) {
+		env, _ := newHome(t)
+		if id, _, err := env.Delete(name("main"), "pj", DeleteOptions{}); err != nil || id != 1 {
+			t.Fatalf("Delete = %d, %v; want environment 1", id, err)
+		}
+	})
 }
 
 func prURL(n int) string { return "https://github.com/acme/proj/pull/" + strconv.Itoa(n) }
