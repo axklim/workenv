@@ -38,6 +38,7 @@ class Workenv < Formula
 
   def install
     bin.install "we"
+    pkgshare.install "skills"
   end
 
   def caveats
@@ -52,6 +53,13 @@ class Workenv < Formula
 
       Neither is needed for `we open --no-terminal`, nor on a remote host
       reached with `we --host`.
+
+      The Claude Code skill that teaches a session to drive `we` ships here:
+
+        #{pkgshare}/skills/we
+
+      Link it into ~/.claude/skills/we (or let your dotfiles do it) so the
+      skill always matches the installed version.
     EOS
   end
 
@@ -62,5 +70,6 @@ class Workenv < Formula
 
     # `we` with no arguments exits non-zero, so the usage check uses `help`.
     assert_match "we open", shell_output("#{bin}/we help")
+    assert_path_exists pkgshare/"skills/we/SKILL.md"
   end
 end
