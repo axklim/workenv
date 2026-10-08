@@ -107,6 +107,15 @@ func dirLine(it we.Item) string {
 	return line
 }
 
+// stateText is STATE as ls and show print it: the tmux state, followed by
+// the first pane's command when there is a session — "detached (zsh)".
+func stateText(it we.Item) string {
+	if it.PaneCommand == "" {
+		return it.SessionState
+	}
+	return it.SessionState + " (" + it.PaneCommand + ")"
+}
+
 // renderList prints `ls`'s output: with opts.Long, the stacked form for
 // every item (renderShow, blank-line separated) — otherwise the table, per
 // the design doc's Listing section: a header row, then two lines per
@@ -128,7 +137,7 @@ func renderList(w io.Writer, items []we.Item, opts renderOpts) error {
 		idW = max(idW, len(id))
 		projW = max(projW, len(it.Project))
 		sessW = max(sessW, len(it.Session))
-		stateW = max(stateW, len(it.SessionState))
+		stateW = max(stateW, len(stateText(it)))
 	}
 
 	header := padLeft("ID", idW) + colSep + padRight("PROJECT", projW) + colSep +
@@ -143,7 +152,7 @@ func renderList(w io.Writer, items []we.Item, opts renderOpts) error {
 	indent := strings.Repeat(" ", idW+len(colSep))
 	for i, it := range items {
 		row := padLeft(ids[i], idW) + colSep + padRight(it.Project, projW) + colSep +
-			padRight(it.Session, sessW) + colSep + padRight(it.SessionState, stateW) + colSep +
+			padRight(it.Session, sessW) + colSep + padRight(stateText(it), stateW) + colSep +
 			formatRefs(it.Issues, it.PRs, opts.Links)
 		if _, err := fmt.Fprintln(w, row); err != nil {
 			return err
@@ -184,7 +193,7 @@ func renderShow(w io.Writer, it we.Item, opts renderOpts) error {
 		{"project", it.Project},
 		{"branch", it.Branch},
 		{"session", it.Session},
-		{"state", it.SessionState},
+		{"state", stateText(it)},
 		{"worktree", dirWorktree(it)},
 		{"repo", abbrevHome(it.RepoPath)},
 	}
@@ -228,6 +237,8 @@ type jsonItem struct {
 	Branch          string    `json:"branch"`
 	Session         string    `json:"session"`
 	State           string    `json:"state"`
+	PaneCommand     string    `json:"pane_command"`
+	ClaudeRunning   bool      `json:"claude_running"`
 	WorktreePath    string    `json:"worktree_path"`
 	WorktreeMissing bool      `json:"worktree_missing"`
 	RepoPath        string    `json:"repo_path"`
@@ -243,7 +254,8 @@ func renderJSON(w io.Writer, items []we.Item) error {
 	for _, it := range items {
 		out = append(out, jsonItem{
 			ID: it.ID, Project: it.Project, Branch: it.Branch, Session: it.Session,
-			State: it.SessionState, WorktreePath: it.WorktreePath, WorktreeMissing: !it.Exists,
+			State: it.SessionState, PaneCommand: it.PaneCommand, ClaudeRunning: it.ClaudeRunning,
+			WorktreePath: it.WorktreePath, WorktreeMissing: !it.Exists,
 			RepoPath: it.RepoPath, Issues: nonNil(it.Issues), PRs: nonNil(it.PRs),
 			CreatedAt: it.CreatedAt,
 		})

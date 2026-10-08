@@ -1192,6 +1192,7 @@ func TestListReportsStateExistsCurrentAndRefs(t *testing.T) {
 	env.Cwd = live
 	fake.Responses = []execx.FakeResponse{
 		{Prefix: "tmux list-sessions", Out: "proj-a\t2\t" + live + "\t1\n"},
+		{Prefix: "tmux list-panes -a", Out: "proj-a\t2.1.295\n"},
 		{Prefix: "git symbolic-ref --short -q HEAD", Out: "a-renamed"},
 	}
 
@@ -1203,10 +1204,10 @@ func TestListReportsStateExistsCurrentAndRefs(t *testing.T) {
 		t.Fatalf("got %d items, want 2: %+v", len(items), items)
 	}
 	b, a := items[0], items[1]
-	if b.ID != 1 || b.SessionState != "none" || b.Exists || b.Current {
+	if b.ID != 1 || b.SessionState != "none" || b.PaneCommand != "" || b.ClaudeRunning || b.Exists || b.Current {
 		t.Errorf("b (missing directory) = %+v", b)
 	}
-	if a.ID != 2 || a.SessionState != "attached" || !a.Exists || !a.Current || a.Branch != "a-renamed" ||
+	if a.ID != 2 || a.SessionState != "attached" || a.PaneCommand != "2.1.295" || !a.ClaudeRunning || !a.Exists || !a.Current || a.Branch != "a-renamed" ||
 		!slices.Equal(a.Issues, []string{"https://github.com/acme/proj/issues/59"}) ||
 		!slices.Equal(a.PRs, []string{"https://github.com/acme/proj/pull/61"}) {
 		t.Errorf("a (live, attached, current) = %+v", a)
@@ -1219,6 +1220,20 @@ func TestListReportsStateExistsCurrentAndRefs(t *testing.T) {
 	}
 	if rec := loadState(t, env).ByID(1); rec == nil || rec.Branch != "b" {
 		t.Errorf("stored branch for id 1 = %+v, want untouched \"b\" (its worktree never existed)", rec)
+	}
+}
+
+// TestClaudeRunning: a shell in the first pane means claude has exited;
+// anything else, including a native install's version-number name, means it
+// still runs.
+func TestClaudeRunning(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		"claude": true, "2.1.295": true, "node": true,
+		"zsh": false, "-zsh": false, "bash": false, "sh": false, "fish": false, "login": false, "": false,
+	} {
+		if got := claudeRunning(cmd); got != want {
+			t.Errorf("claudeRunning(%q) = %v, want %v", cmd, got, want)
+		}
 	}
 }
 

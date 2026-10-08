@@ -325,10 +325,10 @@ session killed.
 ## Listing
 
 ```
-ID  PROJECT  SESSION                                       STATE     REFS
- 7  trade    trade-review_claude-file                      attached  #59 PR#61
+ID  PROJECT  SESSION                                       STATE              REFS
+ 7  trade    trade-review_claude-file                      attached (claude)  #59 PR#61
     dir: ~/projects/trade.review_claude-file
- 8  trade    trade-dev-overlay-pins-a-stale-mini-internal  detached  #44
+ 8  trade    trade-dev-overlay-pins-a-stale-mini-internal  detached (zsh)     #44
     dir: ~/projects/trade.dev-overlay-pins-a-stale-mini-internal (missing)
 ```
 
@@ -337,7 +337,14 @@ ID  PROJECT  SESSION                                       STATE     REFS
   `(missing)` — the next `open` recreates it.
 - `REFS` renders `#59` / `PR#61`, each an OSC 8 hyperlink to its full URL
   when stdout is a terminal, plain text otherwise. `-` when there are none.
-- `STATE` is `attached` / `detached` / `none`, from tmux.
+- `STATE` is `attached` / `detached` / `none`, from tmux. A live session
+  adds its first pane's `#{pane_current_command}` in parentheses — the pane
+  claude was started in — so `detached (claude)` is still working and
+  `detached (zsh)` has finished or crashed. The name is shown as tmux
+  reports it: claude from the native installer is named after its version,
+  `detached (2.1.295)`. For the same reason "claude is running" is never
+  decided by comparing with the word `claude`: a shell (`zsh`, `bash`, `sh`,
+  `fish`, `login`) means claude has exited, anything else means it runs.
 - The environment containing the current directory is marked.
 - Colour and hyperlinks are suppressed when stdout is not a terminal or
   `NO_COLOR` is set.
@@ -345,8 +352,9 @@ ID  PROJECT  SESSION                                       STATE     REFS
   issue and PR URLs, repository directory, creation time.
 - `--json` prints the stacked form's facts for an agent to read: a JSON array,
   one object per environment, `[]` when there are none. Keys are stable:
-  `id`, `project`, `branch`, `session`, `state`, `worktree_path`,
-  `worktree_missing`, `repo_path`, `issues`, `prs` (both always arrays),
+  `id`, `project`, `branch`, `session`, `state` (without the command),
+  `pane_command` (`""` with no session), `claude_running` (the rule above;
+  `false` with no session), `worktree_path`, `worktree_missing`, `repo_path`, `issues`, `prs` (both always arrays),
   `created_at` (RFC 3339). Paths are absolute, not `~`-abbreviated. `-l` has
   no effect with it.
 
@@ -387,7 +395,7 @@ runner, asserting exact argv and the persisted registry:
   canonicalisation and lookup, uniqueness invariants.
 - **naming** — session and directory derivation, sanitizing, project from
   origin.
-- **we** — each resolution path above; issue and PR converging on one
+- **we** — each resolution path above; claude running versus a shell; issue and PR converging on one
   environment; adoption of an existing worktree; refusal to adopt an untagged
   session; repair of a missing worktree and session, with Remote Control
   from the config or `--rc` and with an initial prompt; a prompt ignored by
@@ -397,6 +405,7 @@ runner, asserting exact argv and the persisted registry:
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails
   to parse or render.
+- **tmuxx** — the first pane's command per session.
 - **cmd** — listing layout, TTY vs piped rendering, `show`, the `--json`
   keys and the empty array.
 

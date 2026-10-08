@@ -93,6 +93,8 @@ type Item struct {
 	ID                       int
 	Project, Branch, Session string
 	SessionState             string // attached | detached | none
+	PaneCommand              string // the first pane's command, "" without a session
+	ClaudeRunning            bool
 	WorktreePath, RepoPath   string
 	Issues, PRs              []string
 	Exists, Current          bool
@@ -534,6 +536,8 @@ func (e *Env) toItem(env *state.Env, sessions []tmuxx.Session) (Item, bool) {
 			if s.Attached {
 				item.SessionState = "attached"
 			}
+			item.PaneCommand = s.Command
+			item.ClaudeRunning = claudeRunning(s.Command)
 			break
 		}
 	}
@@ -548,6 +552,18 @@ func (e *Env) toItem(env *state.Env, sessions []tmuxx.Session) (Item, bool) {
 	}
 	item.Current = within(env.WorktreePath, e.Cwd)
 	return item, changed
+}
+
+// claudeRunning reports whether the first pane still runs claude. claude
+// from the native installer is named after its version (2.1.295), so the
+// test is "not a shell" rather than "is claude": the pane drops back to its
+// shell once claude exits.
+func claudeRunning(command string) bool {
+	switch strings.TrimPrefix(command, "-") {
+	case "", "zsh", "bash", "sh", "fish", "login":
+		return false
+	}
+	return true
 }
 
 // within reports whether child is parent itself or somewhere inside it.

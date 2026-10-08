@@ -13,21 +13,24 @@ import (
 )
 
 // plainItems returns the two items used across the list-rendering tests: one
-// attached environment with an issue and a PR, one detached environment
-// whose worktree directory is missing and carries no refs.
+// attached environment running claude with an issue and a PR, one detached
+// environment back at its shell whose worktree directory is missing and
+// carries no refs.
 func plainItems(home string) []we.Item {
 	return []we.Item{
 		{
-			ID:           7,
-			Project:      "trade",
-			Branch:       "review_claude-file",
-			Session:      "trade-review_claude-file",
-			SessionState: "attached",
-			WorktreePath: home + "/projects/trade.review_claude-file",
-			RepoPath:     home + "/projects/trade",
-			Issues:       []string{"https://github.com/axklim/trade/issues/59"},
-			PRs:          []string{"https://github.com/axklim/trade/pull/61"},
-			Exists:       true,
+			ID:            7,
+			Project:       "trade",
+			Branch:        "review_claude-file",
+			Session:       "trade-review_claude-file",
+			SessionState:  "attached",
+			PaneCommand:   "2.1.295",
+			ClaudeRunning: true,
+			WorktreePath:  home + "/projects/trade.review_claude-file",
+			RepoPath:      home + "/projects/trade",
+			Issues:        []string{"https://github.com/axklim/trade/issues/59"},
+			PRs:           []string{"https://github.com/axklim/trade/pull/61"},
+			Exists:        true,
 		},
 		{
 			ID:           8,
@@ -35,6 +38,7 @@ func plainItems(home string) []we.Item {
 			Branch:       "dev-overlay-pins-a-stale-mini-internal",
 			Session:      "trade-dev-overlay-pins-a-stale-mini-internal",
 			SessionState: "detached",
+			PaneCommand:  "zsh",
 			WorktreePath: home + "/projects/trade.dev-overlay-pins-a-stale-mini-internal",
 			RepoPath:     home + "/projects/trade",
 			Exists:       false,
@@ -81,8 +85,11 @@ func TestRenderListPlain(t *testing.T) {
 	row1, dir1 := lines[1], lines[2]
 	row2, dir2 := lines[3], lines[4]
 
-	if !strings.Contains(row1, "trade-review_claude-file") || !strings.Contains(row1, "attached") {
+	if !strings.Contains(row1, "trade-review_claude-file") || !strings.Contains(row1, "attached (2.1.295)") {
 		t.Errorf("row1 %q missing expected fields", row1)
+	}
+	if strings.Index(row1, "#59") != strings.Index(header, "REFS") {
+		t.Errorf("row1 %q: REFS not aligned with header %q", row1, header)
 	}
 	if !strings.Contains(row1, "#59 PR#61") {
 		t.Errorf("row1 %q missing refs #59 PR#61", row1)
@@ -102,8 +109,8 @@ func TestRenderListPlain(t *testing.T) {
 		t.Errorf("dir1 %q must not be marked (missing), the directory exists", dir1)
 	}
 
-	if !strings.Contains(row2, "detached") {
-		t.Errorf("row2 %q missing state detached", row2)
+	if !strings.Contains(row2, "detached (zsh)") {
+		t.Errorf("row2 %q missing state detached (zsh)", row2)
 	}
 	if !strings.Contains(row2, "-") {
 		t.Errorf("row2 %q missing '-' for no refs", row2)
@@ -169,6 +176,7 @@ func TestRenderShow(t *testing.T) {
 		Branch:       "review_claude-file",
 		Session:      "trade-review_claude-file",
 		SessionState: "attached",
+		PaneCommand:  "claude",
 		WorktreePath: "/Users/u/projects/trade.review_claude-file",
 		RepoPath:     "/Users/u/projects/trade",
 		Issues:       []string{"https://github.com/axklim/trade/issues/59"},
@@ -189,7 +197,7 @@ func TestRenderShow(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("renderShow produced no output")
 	}
-	for _, want := range []string{"7", "trade", "review_claude-file", "trade-review_claude-file", "attached"} {
+	for _, want := range []string{"7", "trade", "review_claude-file", "trade-review_claude-file", "attached (claude)"} {
 		found := false
 		for _, l := range lines {
 			if strings.Contains(l, want) {
@@ -272,7 +280,7 @@ func TestRenderJSON(t *testing.T) {
 		t.Fatalf("got %d objects, want 2:\n%s", len(got), buf.String())
 	}
 
-	wantKeys := []string{"branch", "created_at", "id", "issues", "project", "prs",
+	wantKeys := []string{"branch", "claude_running", "created_at", "id", "issues", "pane_command", "project", "prs",
 		"repo_path", "session", "state", "worktree_missing", "worktree_path"}
 	for i, obj := range got {
 		var keys []string
@@ -292,6 +300,8 @@ func TestRenderJSON(t *testing.T) {
 		"branch":           "review_claude-file",
 		"session":          "trade-review_claude-file",
 		"state":            "attached",
+		"pane_command":     "2.1.295",
+		"claude_running":   true,
 		"worktree_path":    "/Users/u/projects/trade.review_claude-file",
 		"worktree_missing": false,
 		"repo_path":        "/Users/u/projects/trade",
@@ -307,6 +317,9 @@ func TestRenderJSON(t *testing.T) {
 	}
 
 	second := got[1]
+	if second["state"] != "detached" || second["pane_command"] != "zsh" || second["claude_running"] != false {
+		t.Errorf("second state, pane_command, claude_running = %v, %v, %v", second["state"], second["pane_command"], second["claude_running"])
+	}
 	if second["worktree_missing"] != true {
 		t.Errorf("second worktree_missing = %v, want true", second["worktree_missing"])
 	}

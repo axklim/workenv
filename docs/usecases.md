@@ -98,8 +98,13 @@ we attach https://github.com/axklim/trade/issues/59
 All four reach the same environment. `attach` never creates: a typo is an
 error, not a new branch.
 
+`STATE` shows what runs in the session's first pane: `detached (claude)` — or
+a version such as `detached (2.1.295)` for a native install — is still
+working, `detached (zsh)` means claude has exited.
+
 `we ls --json` prints the same environments as a JSON array, for a script or
-an agent to read instead of parsing the table.
+an agent to read instead of parsing the table; `claude_running` there answers
+the same question.
 
 ### Rename the branch mid-flight
 
