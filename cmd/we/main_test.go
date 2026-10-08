@@ -250,6 +250,57 @@ func TestRunListJSONPassesThroughToRemote(t *testing.T) {
 	}
 }
 
+// TestRunGCPassesThroughToRemote: gc rides --host with its flags.
+func TestRunGCPassesThroughToRemote(t *testing.T) {
+	fake := &execx.Fake{}
+	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
+	opts, name := parse(t, "gc", "--host", "devbox", "--dry-run", "--delete-branch")
+	if name != "gc" {
+		t.Fatalf("command = %q, want gc", name)
+	}
+	if err := runGC(env, opts.GC); err != nil {
+		t.Fatalf("runGC: %v", err)
+	}
+	if got := fake.Joined(); len(got) != 1 || got[0] != "ssh devbox we gc --dry-run --delete-branch" {
+		t.Errorf("calls = %q, want [ssh devbox we gc --dry-run --delete-branch]", got)
+	}
+}
+
+func TestRunGCPrintsWhatItDeletes(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "envs.json")
+	st := &state.Store{Path: statePath}
+	st.Add(&state.Env{Project: "proj", Branch: "x", TmuxSession: "proj-x", WorktreePath: filepath.Join(dir, "gone"), RepoPath: dir,
+		PRs: []string{"https://github.com/acme/proj/pull/61"}})
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "gh pr view 61", Out: `{"state":"MERGED"}`},
+		{Prefix: "tmux has-session", Err: errors.New("no session")},
+	}}
+	env := &we.Env{Cfg: config.Config{}, R: fake, StatePath: statePath, Cwd: dir}
+
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"gc", "--dry-run"}, "would delete environment 1 (session proj-x)\n"},
+		{[]string{"gc"}, "deleted environment 1 (session proj-x)\n"},
+		{[]string{"gc"}, "no finished environments\n"},
+	} {
+		opts, _ := parse(t, c.args...)
+		out := captureStdout(t, func() {
+			if err := runGC(env, opts.GC); err != nil {
+				t.Fatalf("runGC: %v", err)
+			}
+		})
+		if out != c.want {
+			t.Errorf("%q output = %q, want %q", c.args, out, c.want)
+		}
+	}
+}
+
 // captureStdout redirects os.Stdout for the duration of fn and returns
 // everything written to it.
 func captureStdout(t *testing.T, fn func()) string {

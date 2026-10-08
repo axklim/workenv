@@ -74,3 +74,20 @@ func (c Client) PR(owner, repo string, num int) (PR, error) {
 	}
 	return pr, nil
 }
+
+// PRState reports a pull request's state as gh spells it: OPEN, CLOSED or
+// MERGED.
+func (c Client) PRState(owner, repo string, num int) (string, error) {
+	out, err := c.R.Output("", "gh", "pr", "view", strconv.Itoa(num),
+		"-R", owner+"/"+repo, "--json", "state")
+	if err != nil {
+		return "", err
+	}
+	var pr struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(out), &pr); err != nil {
+		return "", fmt.Errorf("parsing gh pr view output: %w", err)
+	}
+	return pr.State, nil
+}

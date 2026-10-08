@@ -1336,3 +1336,175 @@ func TestShowAndDeleteRepoURLGiveHelpfulError(t *testing.T) {
 		t.Fatalf("Delete: expected an error containing %q, got %v", want, err)
 	}
 }
+
+func prURL(n int) string { return "https://github.com/acme/proj/pull/" + strconv.Itoa(n) }
+
+func prState(n int, state string) execx.FakeResponse {
+	return execx.FakeResponse{Prefix: "gh pr view " + strconv.Itoa(n) + " -R acme/proj --json state", Out: `{"state":"` + state + `"}`}
+}
+
+// seedGC records one environment per gc rule: only id 1 — worktree gone,
+// its one PR merged, a tagged session still live — is finished.
+func seedGC(t *testing.T, env *Env, repo string) {
+	t.Helper()
+	gone := func(n string) string { return filepath.Join(env.Cwd, "gone-"+n) }
+	seed(t, env,
+		&state.Env{Project: "proj", Branch: "merged", TmuxSession: "proj-merged", WorktreePath: gone("merged"), RepoPath: repo, PRs: []string{prURL(61)}},
+		&state.Env{Project: "proj", Branch: "open", TmuxSession: "proj-open", WorktreePath: gone("open"), RepoPath: repo, PRs: []string{prURL(62)}},
+		&state.Env{Project: "proj", Branch: "present", TmuxSession: "proj-present", WorktreePath: mkdir(t, filepath.Join(env.Cwd, "present")), RepoPath: repo, PRs: []string{prURL(63)}},
+		&state.Env{Project: "proj", Branch: "main", TmuxSession: "proj-main", WorktreePath: gone("main"), RepoPath: repo},
+		&state.Env{Project: "proj", Branch: "half", TmuxSession: "proj-half", WorktreePath: gone("half"), RepoPath: repo, PRs: []string{prURL(64), prURL(65)}},
+	)
+}
+
+var gcStates = []execx.FakeResponse{
+	prState(61, "MERGED"), prState(62, "OPEN"), prState(63, "MERGED"), prState(64, "CLOSED"), prState(65, "OPEN"),
+	{Prefix: "tmux show-options -t proj-merged @workenv", Out: "@workenv 1"},
+}
+
+func ids(envs []*state.Env) []int {
+	var out []int
+	for _, e := range envs {
+		out = append(out, e.ID)
+	}
+	return out
+}
+
+func TestGCDeletesOnlyFinishedEnvironments(t *testing.T) {
+	fake := &execx.Fake{Responses: gcStates}
+	env, repo := newTestEnv(t, fake)
+	seedGC(t, env, repo)
+
+	retired, err := env.GC(GCOptions{DeleteBranch: true})
+	if err != nil {
+		t.Fatalf("GC error: %v", err)
+	}
+	if len(retired) != 1 || retired[0] != (Retired{ID: 1, Session: "proj-merged"}) {
+		t.Errorf("retired = %+v, want only environment 1", retired)
+	}
+	if got := ids(loadState(t, env).Envs); !slices.Equal(got, []int{2, 3, 4, 5}) {
+		t.Errorf("remaining ids = %v, want [2 3 4 5]", got)
+	}
+	var ghCalls []string
+	for _, c := range fake.Joined() {
+		if strings.HasPrefix(c, "gh ") {
+			ghCalls = append(ghCalls, c)
+		}
+	}
+	// 63 has a worktree and 4 has no PR, so neither is asked about; 64 is
+	// closed but 65 is open, so environment 5 stays.
+	wantGh := []string{
+		"gh pr view 61 -R acme/proj --json state",
+		"gh pr view 62 -R acme/proj --json state",
+		"gh pr view 64 -R acme/proj --json state",
+		"gh pr view 65 -R acme/proj --json state",
+	}
+	if !slices.Equal(ghCalls, wantGh) {
+		t.Errorf("gh calls = %q, want %q", ghCalls, wantGh)
+	}
+	for _, want := range []string{"tmux kill-session -t =proj-merged", "git worktree prune", "git branch -D merged"} {
+		if !hasCall(fake, want) {
+			t.Errorf("missing call %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+		}
+	}
+	for _, c := range fake.Joined() {
+		if strings.HasPrefix(c, "tmux kill-session") && c != "tmux kill-session -t =proj-merged" ||
+			strings.HasPrefix(c, "git branch -D") && c != "git branch -D merged" {
+			t.Errorf("unexpected teardown call %q", c)
+		}
+	}
+}
+
+func TestGCDryRunChangesNothing(t *testing.T) {
+	fake := &execx.Fake{Responses: gcStates}
+	env, repo := newTestEnv(t, fake)
+	seedGC(t, env, repo)
+	before, err := os.ReadFile(env.StatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	retired, err := env.GC(GCOptions{DryRun: true, DeleteBranch: true})
+	if err != nil {
+		t.Fatalf("GC error: %v", err)
+	}
+	if len(retired) != 1 || retired[0].ID != 1 {
+		t.Errorf("retired = %+v, want only environment 1", retired)
+	}
+	for _, c := range fake.Joined() {
+		if !strings.HasPrefix(c, "gh pr view") {
+			t.Errorf("dry run must only ask gh, got %q", c)
+		}
+	}
+	if after, _ := os.ReadFile(env.StatePath); string(after) != string(before) {
+		t.Error("dry run must not write the registry")
+	}
+}
+
+// TestGCFailsWithoutGhAndDeletesNothing: gc decides from GitHub, so a gh
+// that cannot answer is an error, raised before anything is torn down —
+// even an environment already known to be finished stays.
+func TestGCFailsWithoutGhAndDeletesNothing(t *testing.T) {
+	fake := &execx.Fake{Responses: append([]execx.FakeResponse{
+		{Prefix: "gh pr view 62", Err: errFake},
+	}, gcStates...)}
+	env, repo := newTestEnv(t, fake)
+	seedGC(t, env, repo)
+
+	retired, err := env.GC(GCOptions{})
+	if err == nil || !strings.Contains(err.Error(), "environment 2") {
+		t.Fatalf("GC error = %v, want one naming environment 2", err)
+	}
+	if len(retired) != 0 {
+		t.Errorf("retired = %+v, want none", retired)
+	}
+	if hasCall(fake, "tmux") || hasCall(fake, "git") {
+		t.Errorf("nothing may be torn down:\n%s", strings.Join(fake.Joined(), "\n"))
+	}
+	if got := ids(loadState(t, env).Envs); len(got) != 5 {
+		t.Errorf("remaining ids = %v, want all five", got)
+	}
+}
+
+func TestListMarksDone(t *testing.T) {
+	fake := &execx.Fake{Responses: gcStates}
+	env, repo := newTestEnv(t, fake)
+	seedGC(t, env, repo)
+
+	items, err := env.List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	for _, it := range items {
+		if it.Done != (it.ID == 1) {
+			t.Errorf("environment %d Done = %v", it.ID, it.Done)
+		}
+	}
+}
+
+// TestListWithoutGhIsNotDone: ls works offline and just does not know —
+// and asks gh only once, since every further call would fail the same way.
+func TestListWithoutGhIsNotDone(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{{Prefix: "gh ", Err: errFake}}}
+	env, repo := newTestEnv(t, fake)
+	seedGC(t, env, repo)
+
+	items, err := env.List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	for _, it := range items {
+		if it.Done {
+			t.Errorf("environment %d is done without gh", it.ID)
+		}
+	}
+	n := 0
+	for _, c := range fake.Joined() {
+		if strings.HasPrefix(c, "gh ") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("gh called %d times, want 1", n)
+	}
+}

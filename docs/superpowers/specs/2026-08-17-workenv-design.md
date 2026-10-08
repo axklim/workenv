@@ -261,6 +261,7 @@ we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
 we delete <target> [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
+we gc     [--dry-run] [--delete-branch] [--host H]
 ```
 `ls` is an alias of `list`; `rm` and `down` of `delete`.
 
@@ -322,6 +323,19 @@ pruned), optionally deletes the branch, and drops the record.
 is not in the registry but names a live `@workenv`-tagged session gets that
 session killed.
 
+**gc** retires finished work. An environment is **finished** when it has at
+least one PR, every one of them is merged or closed, and its worktree is
+missing. A missing worktree alone stays recoverable — the next `open`
+re-adds it — and an environment without a PR, such as a project home on
+`main`, is never finished. gc asks `gh pr view <n> -R <owner>/<repo> --json
+state` once per PR of each environment whose worktree is missing, then
+deletes every finished one exactly like `delete` (a tagged live session is
+killed, the stale worktree pruned, the branch deleted with
+`--delete-branch`). `--dry-run` prints what would go and changes nothing.
+GitHub is asked about every candidate before anything is torn down, so when
+`gh` is missing, offline or unauthenticated, gc fails naming the
+environment and deletes nothing.
+
 ## Listing
 
 ```
@@ -345,6 +359,12 @@ ID  PROJECT  SESSION                                       STATE              RE
   `detached (2.1.295)`. For the same reason "claude is running" is never
   decided by comparing with the word `claude`: a shell (`zsh`, `bash`, `sh`,
   `fish`, `login`) means claude has exited, anything else means it runs.
+- A finished environment (see *gc*) reads `done` in `STATE` instead of
+  `none`, and `done, detached (zsh)` while its session still lives. Deciding
+  that takes the same `gh` calls as gc, made only for rows whose worktree is
+  missing and which have a PR. `ls` must work without GitHub, so when `gh`
+  fails the row is simply not `done`, and the remaining lookups are skipped
+  rather than failing one by one. `show` and `-l` follow the same rule.
 - The environment containing the current directory is marked.
 - Colour and hyperlinks are suppressed when stdout is not a terminal or
   `NO_COLOR` is set.
@@ -354,7 +374,8 @@ ID  PROJECT  SESSION                                       STATE              RE
   one object per environment, `[]` when there are none. Keys are stable:
   `id`, `project`, `branch`, `session`, `state` (without the command),
   `pane_command` (`""` with no session), `claude_running` (the rule above;
-  `false` with no session), `worktree_path`, `worktree_missing`, `repo_path`, `issues`, `prs` (both always arrays),
+  `false` with no session), `worktree_path`, `worktree_missing`, `done`
+  (finished, the rule above; `state` keeps the tmux value), `repo_path`, `issues`, `prs` (both always arrays),
   `created_at` (RFC 3339). Paths are absolute, not `~`-abbreviated. `-l` has
   no effect with it.
 
@@ -366,7 +387,7 @@ shell-quoted, since ssh joins its arguments into one remote command line —
 parses the `WE_SESSION=` marker, and opens a local Ghostty running `ssh -t
 devbox tmux attach-session -t <session>`. `remote_control` is read from the remote host's config, since
 that is the `we` starting claude.
-`ls` (with `-l` and `--json`), `show` and `delete` pass through unchanged. The remote host needs `we`
+`ls` (with `-l` and `--json`), `show`, `delete` and `gc` pass through unchanged. The remote host needs `we`
 installed; its path is `remote_we`.
 
 ## Configuration
@@ -401,13 +422,15 @@ runner, asserting exact argv and the persisted registry:
   from the config or `--rc` and with an initial prompt; a prompt ignored by
   a live session; branch drift; placement
   (default template, a custom `worktree_path`, `--wt` name and path);
-  delete semantics.
+  delete semantics; gc collecting only finished environments, `--dry-run`,
+  failing without `gh` before touching anything, and `ls` marking `done`
+  and staying usable without `gh`.
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails
   to parse or render.
 - **tmuxx** — the first pane's command per session.
 - **cmd** — listing layout, TTY vs piped rendering, `show`, the `--json`
-  keys and the empty array.
+  keys and the empty array, the `done` state, `gc` output and `--host`.
 
 ## Use cases
 
@@ -541,6 +564,18 @@ we delete 7 --delete-branch
 Kills the session, removes the worktree, deletes the branch, drops the
 record. `--force` if the worktree is dirty, `--keep-worktree` to stop after
 killing the session.
+
+### Clear out merged work
+
+```
+we ls            # 7  trade  trade-review-claude-md-file  done  #59 PR#61
+we gc --dry-run  # would delete environment 7 (session trade-review-claude-md-file)
+we gc --delete-branch
+```
+
+PR#61 is merged and the worktree was removed after it, so environment 7 is
+finished: gc drops its record and its branch. An environment whose PR is
+still open, or whose worktree is still there, stays.
 
 ### Do any of it on another machine
 

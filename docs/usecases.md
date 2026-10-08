@@ -160,6 +160,25 @@ Kills the session, removes the worktree, deletes the branch, drops the record.
 `--force` if the worktree is dirty, `--keep-worktree` to stop after killing the
 session.
 
+### Clear out merged work
+
+```
+we ls            # 7  trade  trade-review-claude-md-file  done  #59 PR#61
+we gc --dry-run  # would delete environment 7 (session trade-review-claude-md-file)
+we gc --delete-branch
+```
+
+An environment is finished once every PR linked to it is merged or closed and
+its worktree is gone; `ls` shows `done` in `STATE` for it (`"done": true` under
+`--json`). `gc` deletes finished environments like `delete` does — a live
+session is killed — and `--delete-branch` deletes their branches too. An
+environment without a PR, such as a project home on `main`, is never
+finished, and one whose worktree still exists stays.
+
+Both ask `gh` for each PR's state. Without `gh` — not installed, offline, not
+logged in — `gc` fails and deletes nothing, while `ls` still lists everything
+and just does not mark anything `done`.
+
 ## On another machine
 
 ```

@@ -66,3 +66,19 @@ func TestRefInIgnoresCaseAndOtherRepos(t *testing.T) {
 		t.Error("In must reject another repository")
 	}
 }
+
+func TestPRState(t *testing.T) {
+	f := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "gh pr view 61", Out: `{"state":"MERGED"}`},
+	}}
+	state, err := Client{R: f}.PRState("axklim", "trade", 61)
+	if err != nil {
+		t.Fatalf("PRState error: %v", err)
+	}
+	if state != "MERGED" {
+		t.Errorf("state = %q, want MERGED", state)
+	}
+	if got := f.Joined()[0]; got != "gh pr view 61 -R axklim/trade --json state" {
+		t.Errorf("command = %q", got)
+	}
+}

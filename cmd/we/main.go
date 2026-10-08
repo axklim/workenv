@@ -34,6 +34,7 @@ type options struct {
 	List    listCmd    `command:"list" alias:"ls" description:"list work environments"`
 	Show    showCmd    `command:"show" description:"print one environment in the stacked form"`
 	Delete  deleteCmd  `command:"delete" alias:"rm" alias:"down" description:"kill the session, remove the worktree, drop the record"`
+	GC      gcCmd      `command:"gc" description:"delete environments whose PRs are merged or closed and whose worktree is gone"`
 	Version versionCmd `command:"version" description:"print the version"`
 }
 
@@ -103,6 +104,12 @@ type deleteCmd struct {
 	KeepWorktree bool `long:"keep-worktree" description:"kill the session only"`
 }
 
+type gcCmd struct {
+	hostOpt
+	DryRun       bool `long:"dry-run" description:"only list what would be deleted"`
+	DeleteBranch bool `long:"delete-branch" description:"also delete the branches"`
+}
+
 type versionCmd struct{}
 
 // guide is everything the generated help cannot express: what a target may
@@ -148,6 +155,12 @@ Examples:
   we ls -l
   we ls --json
   we delete 7 --delete-branch
+  we gc --dry-run
+
+gc deletes an environment once every PR linked to it is merged or closed
+and its worktree is gone; one without a PR is never deleted. It asks gh
+about each one and fails, deleting nothing, when gh cannot answer. ls marks
+such rows done, and without gh simply does not.
 
 Config (XDG): ~/.config/workenv/config.toml
   projects_path = "~/projects"   where repositories live / get cloned
@@ -231,6 +244,8 @@ func run(args []string) error {
 		return runShow(env, opts.Show)
 	case "delete":
 		return runDelete(env, opts.Delete)
+	case "gc":
+		return runGC(env, opts.GC)
 	}
 	return fmt.Errorf("unknown command %q", p.Active.Name)
 }
@@ -470,6 +485,34 @@ func runDelete(env *we.Env, c deleteCmd) error {
 		fmt.Printf("deleted environment %d (session %s)\n", id, session)
 	} else {
 		fmt.Printf("killed stray session %s\n", session)
+	}
+	return nil
+}
+
+func runGC(env *we.Env, c gcCmd) error {
+	if c.Host != "" {
+		remote := []string{c.Host, env.Cfg.RemoteWe, "gc"}
+		if c.DryRun {
+			remote = append(remote, "--dry-run")
+		}
+		if c.DeleteBranch {
+			remote = append(remote, "--delete-branch")
+		}
+		return env.R.Run("", "ssh", remote...)
+	}
+	retired, err := env.GC(we.GCOptions{DryRun: c.DryRun, DeleteBranch: c.DeleteBranch})
+	verb := "deleted"
+	if c.DryRun {
+		verb = "would delete"
+	}
+	for _, r := range retired {
+		fmt.Printf("%s environment %d (session %s)\n", verb, r.ID, r.Session)
+	}
+	if err != nil {
+		return err
+	}
+	if len(retired) == 0 {
+		fmt.Println("no finished environments")
 	}
 	return nil
 }
