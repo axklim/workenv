@@ -58,3 +58,27 @@ func TestNewTagsSessionWithID(t *testing.T) {
 		}
 	}
 }
+
+func TestListReadsFirstPaneCommand(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "tmux list-sessions", Out: "proj-a\t1\t/a\t0\nproj-b\t2\t/b\t1\n"},
+		{Prefix: "tmux list-panes -a", Out: "personal\tvim\nproj-a\t2.1.295\nproj-a\tzsh\nproj-b\tzsh\nproj-b\tclaude\n"},
+	}}
+	sessions, err := (Tmux{R: fake}).List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	if len(sessions) != 2 || sessions[0].Command != "2.1.295" || sessions[1].Command != "zsh" {
+		t.Errorf("sessions = %+v, want first-pane commands 2.1.295 and zsh", sessions)
+	}
+}
+
+func TestListSkipsPanesWithoutSessions(t *testing.T) {
+	fake := &execx.Fake{}
+	if _, err := (Tmux{R: fake}).List(); err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	if got := fake.Joined(); len(got) != 1 {
+		t.Errorf("calls = %q, want only list-sessions", got)
+	}
+}

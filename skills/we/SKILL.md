@@ -88,7 +88,9 @@ knows.
 ## Reading back
 
 `we ls` prints one row per environment — id, project, session, `STATE`, refs —
-and a `dir:` line. `STATE` comes from tmux and says nothing about claude:
+and a `dir:` line. `STATE` comes from tmux, followed by the first pane's
+command in parentheses: a shell (`zsh`, `bash`, …) means claude has exited;
+anything else, including a version such as `2.1.295`, means it still runs.
 
 - `attached` — a terminal is on the session.
 - `detached` — the session is alive, nobody is looking at it.

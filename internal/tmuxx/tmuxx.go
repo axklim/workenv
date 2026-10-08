@@ -25,6 +25,9 @@ type Session struct {
 	ID       int
 	Path     string
 	Attached bool
+	// Command is #{pane_current_command} of the session's first pane, where
+	// claude was started.
+	Command string
 }
 
 func (t Tmux) Has(name string) bool {
@@ -83,7 +86,19 @@ func (t Tmux) List() ([]Session, error) {
 		}
 		return nil, err
 	}
-	return parseSessions(out), nil
+	sessions := parseSessions(out)
+	if len(sessions) == 0 {
+		return sessions, nil
+	}
+	panes, err := t.R.Output("", "tmux", "list-panes", "-a", "-F", "#{session_name}\t#{pane_current_command}")
+	if err != nil {
+		return nil, err
+	}
+	commands := firstPaneCommands(panes)
+	for i := range sessions {
+		sessions[i].Command = commands[sessions[i].Name]
+	}
+	return sessions, nil
 }
 
 // HasClients reports whether any terminal is currently attached.
@@ -122,4 +137,21 @@ func parseSessions(raw string) []Session {
 		})
 	}
 	return sessions
+}
+
+// firstPaneCommands maps each session to the command of its first pane.
+// list-panes -a lists windows and panes in index order, so the first line
+// for a session is its first pane whatever base-index is.
+func firstPaneCommands(raw string) map[string]string {
+	commands := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		name, cmd, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		if _, seen := commands[name]; !seen {
+			commands[name] = cmd
+		}
+	}
+	return commands
 }
