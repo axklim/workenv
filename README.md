@@ -133,6 +133,20 @@ The default places worktrees as siblings of the repository:
 `~/projects/trade.review_claude-file`. A worktree already checked out on the
 branch is adopted rather than duplicated.
 
+## Claude Code skill
+
+The repository is also a Claude Code plugin: `skills/we/SKILL.md` teaches a
+session to turn "run a session for the infra project, name it review" into the
+right `we open` call — target kinds, `--repo`, `--rc`, `--prompt`,
+`--no-terminal` for a headless caller, and what `we ls` does and does not
+know. The plugin is named `workenv` and is listed in the
+`axklim/claude-plugins` marketplace; it lives here so it is versioned with the
+CLI.
+
+```
+/plugin install workenv --marketplace axklim/claude-plugins
+```
+
 ## How it works
 
 Environments are recorded in `~/.local/state/workenv/envs.json`

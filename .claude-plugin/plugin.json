@@ -1,0 +1,9 @@
+{
+  "name": "workenv",
+  "description": "Drive the we (workenv) CLI: open, attach to, list and tear down per-task work environments — worktree, tmux session and claude — from a sentence.",
+  "author": { "name": "axklim" },
+  "homepage": "https://github.com/axklim/workenv",
+  "repository": "https://github.com/axklim/workenv",
+  "license": "MIT",
+  "keywords": ["workenv", "we", "worktree", "tmux", "claude", "sessions"]
+}
