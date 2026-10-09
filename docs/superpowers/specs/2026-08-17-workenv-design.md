@@ -334,7 +334,7 @@ ignored, so re-running a command from shell history still attaches.
   from another device is the same one (same rule: a `claude_cmd` that
   passes `--remote-control` itself keeps its own); with `--model` or
   `--effort`, `--model <name>` / `--effort <level>` are appended,
-  shell-quoted (same rule again); with `--prompt`, the text goes last,
+  shell-quoted, replacing the same flag in `claude_cmd`; with `--prompt`, the text goes last,
   shell-quoted, as claude's positional first prompt;
 - branch renamed inside the worktree → the stored branch is refreshed.
 
@@ -367,8 +367,10 @@ claude's model and reasoning effort for one environment, where `claude_cmd`
 is global. Like `--prompt` they apply only when repair starts the session;
 on a live one they are named in the same stderr note as an ignored
 `--prompt` (one line, e.g. `--model, --prompt ignored`). Values pass through
-verbatim — `we` does not validate them, claude does. A `claude_cmd` that
-passes `--model` or `--effort` itself keeps its own value. `attach` does not
+verbatim — `we` does not validate them, claude does. Unlike `--name` and
+`--remote-control`, they override the config: a `claude_cmd` that passes
+`--model` or `--effort` has that flag and its value dropped, since the flag
+typed for one environment is the more specific request. `attach` does not
 define either.
 
 **Adoption.** A live tmux session with the target name is reused only if it

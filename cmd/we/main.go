@@ -146,8 +146,8 @@ hit, open prints a note to stderr saying they were ignored.
 creation or when repair restarts a missing one. A session that is already
 running is left alone, and open says on stderr that --prompt was ignored.
 --model <name> and --effort <level> work the same way: passed to claude
-verbatim when open starts the session, reported as ignored otherwise. A
-claude_cmd that passes either flag itself keeps its own value.
+verbatim when open starts the session, reported as ignored otherwise. They
+override the same flag in claude_cmd.
 
 --host <host> runs the same command over ssh (creation overrides passed
 through) and, for open/attach, opens a local Ghostty attached to the

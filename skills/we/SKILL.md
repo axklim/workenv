@@ -65,7 +65,7 @@ ignored. `attach` does not accept them.
 - `--prompt "TEXT"` — claude's first prompt, typed in as soon as it starts.
   This is how one agent hands work to another; the text arrives verbatim.
 - `--model NAME`, `--effort LEVEL` — claude's model and effort for this
-  environment, passed through verbatim; a `claude_cmd` that sets one wins.
+  environment, passed through verbatim; they override `claude_cmd`'s own.
 - `--no-terminal` — open or switch no terminal; `attach` takes it too.
   **Required when the caller is headless**: from inside tmux, `open` and
   `attach` otherwise switch the caller's own tmux client to the session; from

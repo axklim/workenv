@@ -871,8 +871,9 @@ func TestOpenStartsClaudeWithModelAndEffort(t *testing.T) {
 // sanitized, so send-keys always types one shell word. --remote-control
 // follows the same rule: appended only when Remote Control is on and the
 // claude_cmd does not pass it itself, and always with the sanitized name.
-// --model and --effort follow it too, quoted, and a prompt goes last, as
-// one quoted word, after whatever was appended.
+// --model and --effort are appended quoted and replace claude_cmd's own
+// value, and a prompt goes last, as one quoted word, after whatever was
+// appended.
 func TestClaudeCommand(t *testing.T) {
 	for _, tc := range []struct {
 		cmd, session  string
@@ -897,8 +898,9 @@ func TestClaudeCommand(t *testing.T) {
 		{"claude", "proj-feature", true, "it's $HOME", `claude --name proj-feature --remote-control proj-feature 'it'\''s $HOME'`, "", ""},
 		{"claude", "proj-feature", false, "", "claude --name proj-feature --model 'opus' --effort 'high'", "opus", "high"},
 		{"claude", "proj-feature", true, "go", "claude --name proj-feature --remote-control proj-feature --model 'opus[1m]' --effort 'max' 'go'", "opus[1m]", "max"},
-		{"claude --model sonnet", "proj-feature", false, "", "claude --model sonnet --name proj-feature --effort 'low'", "opus", "low"},
-		{"claude --model=sonnet --effort=xhigh", "proj-feature", false, "", "claude --model=sonnet --effort=xhigh --name proj-feature", "opus", "low"},
+		{"claude --model sonnet", "proj-feature", false, "", "claude --name proj-feature --model 'opus' --effort 'low'", "opus", "low"},
+		{"claude --model=sonnet --effort=xhigh", "proj-feature", false, "", "claude --name proj-feature --model 'opus' --effort 'low'", "opus", "low"},
+		{"claude --model sonnet --verbose --effort xhigh", "proj-feature", false, "", "claude --verbose --effort xhigh --name proj-feature --model 'opus'", "opus", ""},
 		{"claude", "proj-feature", false, "", `claude --name proj-feature --model 'it'\''s'`, "it's", ""},
 	} {
 		l := launch{RemoteControl: tc.rc, Model: tc.model, Effort: tc.effort, Prompt: tc.prompt}
