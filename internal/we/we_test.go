@@ -426,6 +426,28 @@ func TestOpenPlainNameCreatesBranch(t *testing.T) {
 	})
 }
 
+// TestOpenNewBranchStartsFromFetchedDefault covers issue #32: a new branch
+// starts from a freshly fetched origin/<default>, an offline fetch does not
+// fail the open, and the start point is reported.
+func TestOpenNewBranchStartsFromFetchedDefault(t *testing.T) {
+	fake := &execx.Fake{Responses: append([]execx.FakeResponse{
+		{Prefix: "git fetch origin +refs/heads/main:refs/remotes/origin/main", Err: errFake},
+		{Prefix: "git rev-parse --short refs/heads/spike", Out: "abc1234"},
+	}, newBranchResponses...)}
+	env, _ := newTestEnv(t, fake)
+
+	res, err := env.Open(OpenOptions{Target: name("spike"), Repo: "proj", NoTerminal: true})
+	if err != nil {
+		t.Fatalf("a failed fetch must not fail open: %v", err)
+	}
+	if res.Base.Ref != "main" || res.Base.Commit != "abc1234" || res.Base.FetchErr == nil {
+		t.Errorf("res.Base = %+v", res.Base)
+	}
+	if !hasCall(fake, "git worktree add -b spike ") {
+		t.Errorf("worktree add never ran:\n%s", strings.Join(fake.Joined(), "\n"))
+	}
+}
+
 // TestOpenThroughAlias covers [aliases]: the alias stands for its
 // repository in --repo and as a plain target, and names the environment,
 // while placement keeps the repository name.
@@ -706,6 +728,9 @@ func TestOpenRecreatesMissingWorktreeAndSession(t *testing.T) {
 	}
 	if res.Created {
 		t.Error("repairing an existing environment must not report Created")
+	}
+	if res.Base.Ref != "" || hasCall(fake, "git fetch") {
+		t.Errorf("re-adding an existing branch must not fetch or report a base: %+v", res.Base)
 	}
 	for _, want := range []string{
 		"git worktree prune",

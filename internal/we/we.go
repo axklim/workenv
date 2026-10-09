@@ -80,6 +80,9 @@ type OpenResult struct {
 	Created                  bool
 	IgnoredOverrides         []string // e.g. ["--branch", "--wt"]
 	PromptIgnored            bool     // the session was already live
+	// Base is where a branch created by this open started; zero when no
+	// branch was created.
+	Base gitx.Base
 }
 
 type DeleteOptions struct {
@@ -130,7 +133,7 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	if err != nil {
 		return OpenResult{}, err
 	}
-	started, err := e.repair(env, created, opts.RemoteControl || e.Cfg.RemoteControl, opts.Prompt)
+	base, started, err := e.repair(env, created, opts.RemoteControl || e.Cfg.RemoteControl, opts.Prompt)
 	if err != nil {
 		return OpenResult{}, err
 	}
@@ -149,7 +152,7 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	return OpenResult{
 		ID: env.ID, Project: env.Project, Branch: env.Branch, Session: env.TmuxSession,
 		WorktreePath: env.WorktreePath, RepoPath: env.RepoPath, Created: created,
-		IgnoredOverrides: ignored, PromptIgnored: opts.Prompt != "" && !started,
+		IgnoredOverrides: ignored, PromptIgnored: opts.Prompt != "" && !started, Base: base,
 	}, nil
 }
 
@@ -285,19 +288,21 @@ func (e *Env) renderPlacement(sp spec, project, branch string) (string, error) {
 // Adoption refusal messages repairSession gives on a session-name conflict:
 // --session still helps on a fresh creation, but cannot on a hit.
 // remoteControl and prompt shape the claude a session it starts runs;
-// started reports whether it started one.
-func (e *Env) repair(env *state.Env, created, remoteControl bool, prompt string) (started bool, err error) {
-	if err := e.repairWorktree(env); err != nil {
-		return false, err
+// started reports whether it started one, base where a branch it created
+// started.
+func (e *Env) repair(env *state.Env, created, remoteControl bool, prompt string) (base gitx.Base, started bool, err error) {
+	base, err = e.repairWorktree(env)
+	if err != nil {
+		return gitx.Base{}, false, err
 	}
 	started, err = e.repairSession(env, created, remoteControl, prompt)
 	if err != nil {
-		return false, err
+		return gitx.Base{}, false, err
 	}
 	if b := e.git().CurrentBranch(env.WorktreePath); b != "" {
 		env.Branch = b
 	}
-	return started, nil
+	return base, started, nil
 }
 
 // repairWorktree re-adds env's worktree when its directory is missing. When
@@ -306,15 +311,15 @@ func (e *Env) repair(env *state.Env, created, remoteControl bool, prompt string)
 // real worktree) is not one, and starting a session there instead of a
 // checkout would be worse than the missing-directory case repair exists to
 // fix.
-func (e *Env) repairWorktree(env *state.Env) error {
+func (e *Env) repairWorktree(env *state.Env) (gitx.Base, error) {
 	if _, err := os.Stat(env.WorktreePath); err == nil {
 		if e.git().CurrentBranch(env.WorktreePath) == "" {
-			return fmt.Errorf("%s exists but is not a git checkout", env.WorktreePath)
+			return gitx.Base{}, fmt.Errorf("%s exists but is not a git checkout", env.WorktreePath)
 		}
-		return nil
+		return gitx.Base{}, nil
 	}
 	if err := e.git().Prune(env.RepoPath); err != nil {
-		return err
+		return gitx.Base{}, err
 	}
 	return e.git().AddWorktree(env.RepoPath, env.WorktreePath, env.Branch)
 }

@@ -167,3 +167,98 @@ func TestCurrentBranch(t *testing.T) {
 		t.Errorf("detached CurrentBranch = %q, want empty", got)
 	}
 }
+
+// newBranchFake scripts a repository where branch feat exists nowhere yet
+// and the default branch is origin's main.
+func newBranchFake(extra ...execx.FakeResponse) *execx.Fake {
+	return &execx.Fake{Responses: append(extra,
+		execx.FakeResponse{Prefix: "git show-ref --verify --quiet refs/heads/feat", Err: errFake},
+		execx.FakeResponse{Prefix: "git show-ref --verify --quiet refs/remotes/origin/feat", Err: errFake},
+		execx.FakeResponse{Prefix: "git symbolic-ref --short refs/remotes/origin/HEAD", Out: "origin/main"},
+		execx.FakeResponse{Prefix: "git rev-parse --short refs/heads/feat", Out: "abc1234"},
+	)}
+}
+
+func callIndex(f *execx.Fake, prefix string) int {
+	for i, c := range f.Joined() {
+		if strings.HasPrefix(c, prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestAddWorktreeFetchesDefaultBranchFirst(t *testing.T) {
+	f := newBranchFake()
+	base, err := (Git{R: f}).AddWorktree("/repo", t.TempDir()+"/wt", "feat")
+	if err != nil {
+		t.Fatalf("AddWorktree error: %v", err)
+	}
+	if base.Ref != "origin/main" || base.Commit != "abc1234" || base.FetchErr != nil {
+		t.Errorf("base = %+v", base)
+	}
+	fetch := callIndex(f, "git fetch origin +refs/heads/main:refs/remotes/origin/main")
+	add := callIndex(f, "git worktree add -b feat ")
+	if fetch < 0 || add < 0 || fetch > add {
+		t.Errorf("want the fetch before worktree add:\n%s", strings.Join(f.Joined(), "\n"))
+	}
+	if !strings.HasSuffix(f.Joined()[add], " origin/main") {
+		t.Errorf("worktree add = %q, want it to start from origin/main", f.Joined()[add])
+	}
+	if c := f.Calls[fetch]; c.Dir != "/repo" || c.Method != "Output" {
+		t.Errorf("fetch ran as %s in %q, want Output in /repo", c.Method, c.Dir)
+	}
+}
+
+func TestAddWorktreeFallsBackWhenFetchFails(t *testing.T) {
+	f := newBranchFake(execx.FakeResponse{Prefix: "git fetch", Err: errFake})
+	base, err := (Git{R: f}).AddWorktree("/repo", t.TempDir()+"/wt", "feat")
+	if err != nil {
+		t.Fatalf("a failed fetch must not fail AddWorktree: %v", err)
+	}
+	if !errors.Is(base.FetchErr, errFake) || base.Ref != "origin/main" {
+		t.Errorf("base = %+v", base)
+	}
+	if callIndex(f, "git worktree add -b feat ") < 0 {
+		t.Errorf("worktree add never ran:\n%s", strings.Join(f.Joined(), "\n"))
+	}
+}
+
+func TestAddWorktreeWithoutOriginDoesNotFetch(t *testing.T) {
+	f := newBranchFake(
+		execx.FakeResponse{Prefix: "git remote get-url origin", Err: errFake},
+		execx.FakeResponse{Prefix: "git show-ref --verify --quiet refs/remotes/origin/main", Err: errFake},
+		execx.FakeResponse{Prefix: "git symbolic-ref --short refs/remotes/origin/HEAD", Err: errFake},
+		execx.FakeResponse{Prefix: "git symbolic-ref --short HEAD", Out: "main"},
+	)
+	base, err := (Git{R: f}).AddWorktree("/repo", t.TempDir()+"/wt", "feat")
+	if err != nil {
+		t.Fatalf("AddWorktree error: %v", err)
+	}
+	if base.Ref != "main" || base.FetchErr != nil {
+		t.Errorf("base = %+v", base)
+	}
+	if callIndex(f, "git fetch") >= 0 {
+		t.Errorf("unexpected fetch without an origin:\n%s", strings.Join(f.Joined(), "\n"))
+	}
+}
+
+func TestAddWorktreeExistingBranchesDoNotFetch(t *testing.T) {
+	for name, f := range map[string]*execx.Fake{
+		"local branch": {}, // show-ref succeeds by default
+		"origin branch": {Responses: []execx.FakeResponse{
+			{Prefix: "git show-ref --verify --quiet refs/heads/feat", Err: errFake},
+		}},
+	} {
+		base, err := (Git{R: f}).AddWorktree("/repo", t.TempDir()+"/wt", "feat")
+		if err != nil {
+			t.Fatalf("%s: AddWorktree error: %v", name, err)
+		}
+		if base != (Base{}) {
+			t.Errorf("%s: base = %+v, want zero", name, base)
+		}
+		if callIndex(f, "git fetch") >= 0 {
+			t.Errorf("%s: unexpected fetch:\n%s", name, strings.Join(f.Joined(), "\n"))
+		}
+	}
+}

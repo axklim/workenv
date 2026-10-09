@@ -401,3 +401,17 @@ func TestHelpOutputContainsWeOpen(t *testing.T) {
 		t.Errorf("`we help` output does not contain %q:\n%s", "we open", out)
 	}
 }
+
+// TestPrintOpenResultShowsBase pins the base line: shown when open cut a
+// new branch, absent otherwise.
+func TestPrintOpenResultShowsBase(t *testing.T) {
+	res := we.OpenResult{ID: 3, Branch: "spike", Session: "proj-spike", Created: true}
+	if out := captureStdout(t, func() { printOpenResult(res) }); strings.Contains(out, "base:") {
+		t.Errorf("no new branch, yet a base line:\n%s", out)
+	}
+	res.Base.Ref, res.Base.Commit = "origin/main", "abc1234"
+	out := captureStdout(t, func() { printOpenResult(res) })
+	if !strings.Contains(out, "branch:   spike\nbase:     origin/main abc1234\n") {
+		t.Errorf("want the base right after the branch:\n%s", out)
+	}
+}
