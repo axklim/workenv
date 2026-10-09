@@ -14,6 +14,7 @@ Worked examples, in the order a day tends to go. Paths assume
 - [On another machine](#on-another-machine) — `--host`
 - [From another device](#from-another-device) — `--rc`
 - [Handing work to a new session](#handing-work-to-a-new-session) — `--prompt`
+- [Picking the model](#picking-the-model) — `--model`, `--effort`
 
 ## Starting work
 
@@ -240,3 +241,17 @@ before it is typed into tmux, so quotes and `$` in it arrive as written. It
 only reaches a session that `open` starts: if the session is already
 running, nothing is typed into it and `open` says on stderr that `--prompt`
 was ignored.
+
+## Picking the model
+
+```
+we open https://github.com/axklim/trade/issues/59 --no-terminal \
+  --model opus --effort high
+```
+
+`claude` starts with `--model opus --effort high`, for this environment only;
+`claude_cmd` stays as it is for the rest. The values go to `claude` as
+written, so whatever names `claude` accepts work here. If `claude_cmd`
+already passes `--model` or `--effort`, its own value wins. Like `--prompt`,
+both only reach a session that `open` starts; on a running one `open` says on
+stderr that they were ignored.

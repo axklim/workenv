@@ -64,6 +64,8 @@ ignored. `attach` does not accept them.
   it for every environment.
 - `--prompt "TEXT"` — claude's first prompt, typed in as soon as it starts.
   This is how one agent hands work to another; the text arrives verbatim.
+- `--model NAME`, `--effort LEVEL` — claude's model and effort for this
+  environment, passed through verbatim; a `claude_cmd` that sets one wins.
 - `--no-terminal` — open or switch no terminal; `attach` takes it too.
   **Required when the caller is headless**: from inside tmux, `open` and
   `attach` otherwise switch the caller's own tmux client to the session; from
@@ -86,8 +88,8 @@ branch starts from a freshly fetched `origin/<default>`; `open` then also
 prints `base: origin/<default> <sha>`, and warns on stderr if it was offline.
 
 **Versions.** `--rc`, `--prompt`, `remote_control`, `ls --json`, the claude
-state in `ls`, `gc` and `[aliases]` arrived in 0.2.0; everything else here is
-older. `we version` says which you have, `we open --help` which flags it knows.
+state in `ls`, `gc` and `[aliases]` arrived in 0.2.0; `--model` and
+`--effort` arrive after 0.2.3; everything else here is older. `we version` says which you have, `we open --help` which flags it knows.
 
 ## Reading back
 
@@ -134,7 +136,8 @@ locations); `remote_we` (path of `we` on `--host` machines).
 ## Common mistakes
 
 - Plain name from outside the repository without `--repo`.
-- `--rc` or `--prompt` against a running session: nothing happens, by design.
+- `--rc`, `--prompt`, `--model` or `--effort` against a running session:
+  nothing happens, by design.
   To reach a running claude, use tmux on the session name from `we show`
   (`send-keys`, `capture-pane`); `we delete <id>` only if it must restart.
 - Dispatching without `--no-terminal`: the bot's tmux client jumps to the new

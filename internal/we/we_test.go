@@ -815,14 +815,14 @@ func TestOpenStartsClaudeWithPrompt(t *testing.T) {
 	if !slices.Contains(fake.Joined(), want) {
 		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
 	}
-	if res.PromptIgnored {
-		t.Error("a prompt the started session received must not be reported as ignored")
+	if len(res.SessionFlagsIgnored) != 0 {
+		t.Errorf("SessionFlagsIgnored = %v; a prompt the started session received must not be reported as ignored", res.SessionFlagsIgnored)
 	}
 }
 
 // TestOpenReportsIgnoredPromptOnLiveSession: a live session keeps the
-// claude it runs, so nothing is typed into it and the prompt is reported
-// back as ignored instead of dropped silently.
+// claude it runs, so nothing is typed into it and the prompt, model and
+// effort are reported back as ignored instead of dropped silently.
 func TestOpenReportsIgnoredPromptOnLiveSession(t *testing.T) {
 	fake := &execx.Fake{Responses: []execx.FakeResponse{
 		{Prefix: "git symbolic-ref --short -q HEAD", Out: "feature-123"},
@@ -832,15 +832,37 @@ func TestOpenReportsIgnoredPromptOnLiveSession(t *testing.T) {
 	path := mkdir(t, filepath.Join(env.Cwd, "wt"))
 	seed(t, env, &state.Env{Project: "proj", Branch: "feature-123", TmuxSession: "proj-feature-123", WorktreePath: path, RepoPath: repo})
 
-	res, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true, Prompt: "do it"})
+	res, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true, Prompt: "do it", Model: "opus", Effort: "high"})
 	if err != nil {
 		t.Fatalf("Open error: %v", err)
 	}
-	if !res.PromptIgnored {
-		t.Error("PromptIgnored = false, want true for a live session")
+	if want := []string{"--model", "--effort", "--prompt"}; !slices.Equal(res.SessionFlagsIgnored, want) {
+		t.Errorf("SessionFlagsIgnored = %v, want %v for a live session", res.SessionFlagsIgnored, want)
 	}
 	if hasCall(fake, "tmux send-keys") {
 		t.Errorf("a live session must not be typed into:\n%s", strings.Join(fake.Joined(), "\n"))
+	}
+}
+
+// TestOpenStartsClaudeWithModelAndEffort covers issue #34: --model and
+// --effort reach claude when repair starts the session, and are not
+// reported as ignored.
+func TestOpenStartsClaudeWithModelAndEffort(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession}}
+	env, repo := newTestEnv(t, fake)
+	gone := filepath.Join(env.Cwd, "gone")
+	seed(t, env, &state.Env{Project: "proj", Branch: "feature-123", TmuxSession: "proj-feature-123", WorktreePath: gone, RepoPath: repo})
+
+	res, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true, Model: "opus[1m]", Effort: "high"})
+	if err != nil {
+		t.Fatalf("Open error: %v", err)
+	}
+	want := "tmux send-keys -t proj-feature-123 claude --name proj-feature-123 --model 'opus[1m]' --effort 'high' Enter"
+	if !slices.Contains(fake.Joined(), want) {
+		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+	}
+	if len(res.SessionFlagsIgnored) != 0 {
+		t.Errorf("SessionFlagsIgnored = %v, want none for a started session", res.SessionFlagsIgnored)
 	}
 }
 
@@ -849,31 +871,39 @@ func TestOpenReportsIgnoredPromptOnLiveSession(t *testing.T) {
 // sanitized, so send-keys always types one shell word. --remote-control
 // follows the same rule: appended only when Remote Control is on and the
 // claude_cmd does not pass it itself, and always with the sanitized name.
-// A prompt goes last, as one quoted word, after whatever was appended.
+// --model and --effort follow it too, quoted, and a prompt goes last, as
+// one quoted word, after whatever was appended.
 func TestClaudeCommand(t *testing.T) {
 	for _, tc := range []struct {
-		cmd, session string
-		rc           bool
-		prompt       string
-		want         string
+		cmd, session  string
+		rc            bool
+		prompt        string
+		want          string
+		model, effort string
 	}{
-		{"claude", "proj-feature", false, "", "claude --name proj-feature"},
-		{"claude --model opus", "proj-feature", false, "", "claude --model opus --name proj-feature"},
-		{"claude --name mine", "proj-feature", false, "", "claude --name mine"},
-		{"claude --name=mine", "proj-feature", false, "", "claude --name=mine"},
-		{"claude -n mine", "proj-feature", false, "", "claude -n mine"},
-		{"claude", "hand edited; rm -rf /", false, "", "claude --name hand-edited-rm-rf"},
-		{"claude", "proj-feature", true, "", "claude --name proj-feature --remote-control proj-feature"},
-		{"claude --name mine", "proj-feature", true, "", "claude --name mine --remote-control proj-feature"},
-		{"claude --remote-control mine", "proj-feature", true, "", "claude --remote-control mine --name proj-feature"},
-		{"claude --remote-control=mine", "proj-feature", true, "", "claude --remote-control=mine --name proj-feature"},
-		{"claude --remote-control mine", "proj-feature", false, "", "claude --remote-control mine --name proj-feature"},
-		{"claude", "hand edited; rm -rf /", true, "", "claude --name hand-edited-rm-rf --remote-control hand-edited-rm-rf"},
-		{"claude", "proj-feature", false, "fix #17", "claude --name proj-feature 'fix #17'"},
-		{"claude", "proj-feature", true, "it's $HOME", `claude --name proj-feature --remote-control proj-feature 'it'\''s $HOME'`},
+		{"claude", "proj-feature", false, "", "claude --name proj-feature", "", ""},
+		{"claude --model opus", "proj-feature", false, "", "claude --model opus --name proj-feature", "", ""},
+		{"claude --name mine", "proj-feature", false, "", "claude --name mine", "", ""},
+		{"claude --name=mine", "proj-feature", false, "", "claude --name=mine", "", ""},
+		{"claude -n mine", "proj-feature", false, "", "claude -n mine", "", ""},
+		{"claude", "hand edited; rm -rf /", false, "", "claude --name hand-edited-rm-rf", "", ""},
+		{"claude", "proj-feature", true, "", "claude --name proj-feature --remote-control proj-feature", "", ""},
+		{"claude --name mine", "proj-feature", true, "", "claude --name mine --remote-control proj-feature", "", ""},
+		{"claude --remote-control mine", "proj-feature", true, "", "claude --remote-control mine --name proj-feature", "", ""},
+		{"claude --remote-control=mine", "proj-feature", true, "", "claude --remote-control=mine --name proj-feature", "", ""},
+		{"claude --remote-control mine", "proj-feature", false, "", "claude --remote-control mine --name proj-feature", "", ""},
+		{"claude", "hand edited; rm -rf /", true, "", "claude --name hand-edited-rm-rf --remote-control hand-edited-rm-rf", "", ""},
+		{"claude", "proj-feature", false, "fix #17", "claude --name proj-feature 'fix #17'", "", ""},
+		{"claude", "proj-feature", true, "it's $HOME", `claude --name proj-feature --remote-control proj-feature 'it'\''s $HOME'`, "", ""},
+		{"claude", "proj-feature", false, "", "claude --name proj-feature --model 'opus' --effort 'high'", "opus", "high"},
+		{"claude", "proj-feature", true, "go", "claude --name proj-feature --remote-control proj-feature --model 'opus[1m]' --effort 'max' 'go'", "opus[1m]", "max"},
+		{"claude --model sonnet", "proj-feature", false, "", "claude --model sonnet --name proj-feature --effort 'low'", "opus", "low"},
+		{"claude --model=sonnet --effort=xhigh", "proj-feature", false, "", "claude --model=sonnet --effort=xhigh --name proj-feature", "opus", "low"},
+		{"claude", "proj-feature", false, "", `claude --name proj-feature --model 'it'\''s'`, "it's", ""},
 	} {
-		if got := claudeCommand(tc.cmd, tc.session, tc.rc, tc.prompt); got != tc.want {
-			t.Errorf("claudeCommand(%q, %q, %v, %q) = %q, want %q", tc.cmd, tc.session, tc.rc, tc.prompt, got, tc.want)
+		l := launch{RemoteControl: tc.rc, Model: tc.model, Effort: tc.effort, Prompt: tc.prompt}
+		if got := claudeCommand(tc.cmd, tc.session, l); got != tc.want {
+			t.Errorf("claudeCommand(%q, %q, %+v) = %q, want %q", tc.cmd, tc.session, l, got, tc.want)
 		}
 	}
 }
