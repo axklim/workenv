@@ -252,6 +252,6 @@ we open https://github.com/axklim/trade/issues/59 --no-terminal \
 `claude` starts with `--model opus --effort high`, for this environment only;
 `claude_cmd` stays as it is for the rest. The values go to `claude` as
 written, so whatever names `claude` accepts work here. If `claude_cmd`
-already passes `--model` or `--effort`, its own value wins. Like `--prompt`,
+already passes `--model` or `--effort`, the flag given to `open` replaces it. Like `--prompt`,
 both only reach a session that `open` starts; on a running one `open` says on
 stderr that they were ignored.

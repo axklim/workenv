@@ -383,10 +383,11 @@ type launch struct {
 
 // claudeCommand is cmd with --name <session> appended and, when Remote
 // Control is on, --remote-control <session> as well, so the name claude
-// shows and the name it is reachable under both match the tmux session. A
-// non-empty model or effort is appended shell-quoted as --model / --effort.
-// A cmd that already passes any of these flags keeps its own value for it.
-// A non-empty prompt goes last, shell-quoted, as claude's positional prompt.
+// shows and the name it is reachable under both match the tmux session; a
+// cmd that already passes either flag keeps its own value for it. A
+// non-empty model or effort is appended shell-quoted as --model / --effort,
+// replacing cmd's own: it was asked for this one environment. A non-empty
+// prompt goes last, shell-quoted, as claude's positional prompt.
 func claudeCommand(cmd, session string, l launch) string {
 	name := naming.Sanitize(session)
 	if !hasFlag(cmd, "-n", "--name") {
@@ -395,11 +396,11 @@ func claudeCommand(cmd, session string, l launch) string {
 	if l.RemoteControl && !hasFlag(cmd, "--remote-control") {
 		cmd += " --remote-control " + name
 	}
-	if l.Model != "" && !hasFlag(cmd, "--model") {
-		cmd += " --model " + execx.ShellQuote(l.Model)
+	if l.Model != "" {
+		cmd = withoutFlag(cmd, "--model") + " --model " + execx.ShellQuote(l.Model)
 	}
-	if l.Effort != "" && !hasFlag(cmd, "--effort") {
-		cmd += " --effort " + execx.ShellQuote(l.Effort)
+	if l.Effort != "" {
+		cmd = withoutFlag(cmd, "--effort") + " --effort " + execx.ShellQuote(l.Effort)
 	}
 	if l.Prompt != "" {
 		cmd += " " + execx.ShellQuote(l.Prompt)
@@ -418,6 +419,26 @@ func hasFlag(cmd string, flags ...string) bool {
 		}
 	}
 	return false
+}
+
+// withoutFlag is cmd without flag and its value, in either --flag value or
+// --flag=value form. A cmd that does not pass flag is returned unchanged.
+func withoutFlag(cmd, flag string) string {
+	if !hasFlag(cmd, flag) {
+		return cmd
+	}
+	words := strings.Fields(cmd)
+	var out []string
+	for i := 0; i < len(words); i++ {
+		switch {
+		case words[i] == flag:
+			i++ // skip its value
+		case strings.HasPrefix(words[i], flag+"="):
+		default:
+			out = append(out, words[i])
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func (e *Env) showInTerminal(session string) error {
