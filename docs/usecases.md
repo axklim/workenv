@@ -103,6 +103,9 @@ we open spike-latency --repo ~/src/fork     # a repository outside projects_path
 
 Branch `spike-latency` off the default branch, worktree
 `~/projects/trade.spike-latency`, session `trade-spike-latency`, no refs.
+`origin/main` is fetched first, so the branch starts from what origin has now,
+and `open` prints the start point (`base: origin/main 1a2b3c4`). Offline, it
+warns and branches from the last fetch instead.
 
 ## Coming back
 

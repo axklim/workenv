@@ -130,28 +130,56 @@ func (g Git) BranchExists(repoDir, ref string) bool {
 	return err == nil
 }
 
+// Base is the start point AddWorktree cut a new branch from; the zero
+// value when it checked out an existing branch instead.
+type Base struct {
+	Ref    string // origin/<default>, or the local default branch without one
+	Commit string // short SHA of the new branch, "" when git cannot say
+	// FetchErr is set when refreshing origin/<default> failed: the branch
+	// then starts from whatever the last fetch left there.
+	FetchErr error
+}
+
 // AddWorktree creates a worktree at path for branch, creating the branch
 // from origin/<branch> or the default branch when it does not exist yet.
-func (g Git) AddWorktree(repoDir, path, branch string) error {
+// Only the default branch is fetched first, so a new branch never starts
+// from a stale origin/<default>; a failed fetch falls back to the local ref.
+func (g Git) AddWorktree(repoDir, path, branch string) (Base, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return Base{}, err
 	}
 	switch {
 	case g.BranchExists(repoDir, "refs/heads/"+branch):
-		return g.R.Run(repoDir, "git", "worktree", "add", path, branch)
+		return Base{}, g.R.Run(repoDir, "git", "worktree", "add", path, branch)
 	case g.BranchExists(repoDir, "refs/remotes/origin/"+branch):
-		return g.R.Run(repoDir, "git", "worktree", "add", "--track", "-b", branch, path, "origin/"+branch)
+		return Base{}, g.R.Run(repoDir, "git", "worktree", "add", "--track", "-b", branch, path, "origin/"+branch)
 	default:
 		base, err := g.DefaultBranch(repoDir)
 		if err != nil {
-			return err
+			return Base{}, err
 		}
-		start := base
+		var b Base
+		if _, err := g.R.Output(repoDir, "git", "remote", "get-url", "origin"); err == nil {
+			b.FetchErr = g.fetchOriginBranch(repoDir, base)
+		}
+		b.Ref = base
 		if g.BranchExists(repoDir, "refs/remotes/origin/"+base) {
-			start = "origin/" + base
+			b.Ref = "origin/" + base
 		}
-		return g.R.Run(repoDir, "git", "worktree", "add", "-b", branch, path, start)
+		if err := g.R.Run(repoDir, "git", "worktree", "add", "-b", branch, path, b.Ref); err != nil {
+			return Base{}, err
+		}
+		b.Commit, _ = g.R.Output(repoDir, "git", "rev-parse", "--short", "refs/heads/"+branch)
+		return b, nil
 	}
+}
+
+// fetchOriginBranch updates refs/remotes/origin/<branch> from origin. The
+// explicit refspec also works in bare repos that have no fetch refspec.
+func (g Git) fetchOriginBranch(repoDir, branch string) error {
+	_, err := g.R.Output(repoDir, "git", "fetch", "origin",
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch))
+	return err
 }
 
 // FetchPRBranch materializes a PR head as local branch, unless it exists.

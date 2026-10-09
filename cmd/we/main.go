@@ -328,8 +328,9 @@ func runOpen(env *we.Env, cmd string, c openCmd, attachOnly bool) error {
 }
 
 // printOpenResult prints the human summary, then the machine-readable
-// WE_SESSION= line the remote flow parses; ignored creation overrides and
-// an ignored --prompt go to stderr, one line each, after everything else.
+// WE_SESSION= line the remote flow parses; a failed fetch of the base,
+// ignored creation overrides and an ignored --prompt go to stderr, one line
+// each, after everything else.
 func printOpenResult(res we.OpenResult) {
 	verb := "found"
 	if res.Created {
@@ -338,9 +339,16 @@ func printOpenResult(res we.OpenResult) {
 	fmt.Printf("%s environment %d\n", verb, res.ID)
 	fmt.Printf("project:  %s\n", res.Project)
 	fmt.Printf("branch:   %s\n", res.Branch)
+	if res.Base.Ref != "" {
+		fmt.Printf("base:     %s\n", strings.TrimSpace(res.Base.Ref+" "+res.Base.Commit))
+	}
 	fmt.Printf("worktree: %s\n", res.WorktreePath)
 	fmt.Printf("session:  %s\n", res.Session)
 	fmt.Printf("WE_SESSION=%s\n", res.Session)
+	if res.Base.FetchErr != nil {
+		reason, _, _ := strings.Cut(res.Base.FetchErr.Error(), "\n")
+		fmt.Fprintf(os.Stderr, "we: could not fetch %s, branched from the local copy: %s\n", res.Base.Ref, reason)
+	}
 	if len(res.IgnoredOverrides) > 0 {
 		fmt.Fprintf(os.Stderr, "we: environment %d already exists; %s ignored\n",
 			res.ID, strings.Join(res.IgnoredOverrides, ", "))

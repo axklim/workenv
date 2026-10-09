@@ -81,7 +81,9 @@ we open https://github.com/OWNER/trade/issues/59 --no-terminal --rc \
 
 `open` prints `created environment N` or `found environment N`, then project,
 branch, worktree, session and a `WE_SESSION=<session>` line. Read the session
-name from there rather than deriving it.
+name from there rather than deriving it. A new branch cut from the default
+branch starts from a freshly fetched `origin/<default>`; `open` then also
+prints `base: origin/<default> <sha>`, and warns on stderr if it was offline.
 
 **Versions.** `--rc`, `--prompt`, `remote_control`, `ls --json`, the claude
 state in `ls`, `gc` and `[aliases]` arrived in 0.2.0; everything else here is

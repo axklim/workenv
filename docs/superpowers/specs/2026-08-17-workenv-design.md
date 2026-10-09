@@ -335,6 +335,17 @@ ignored, so re-running a command from shell history still attaches.
   text goes last, shell-quoted, as claude's positional first prompt;
 - branch renamed inside the worktree → the stored branch is refreshed.
 
+**New branches start from a fresh default branch.** A branch that exists
+neither locally nor on origin is cut from the default branch, and only that
+path fetches: `git fetch origin +refs/heads/<default>:refs/remotes/origin/<default>`
+runs right before `git worktree add`, so the start point is
+`origin/<default>` as origin has it now, not as the last fetch left it.
+Existing local branches and PR heads are not fetched here, and a repository
+without an `origin` remote starts from its local default branch. A failed
+fetch never fails the open: `open` warns in one line on stderr and branches
+from the local ref. Either way it prints a `base:` line (start ref and short
+commit) after `branch:`, so a stale base is visible.
+
 **Remote Control** is off unless `remote_control = true` in the config or
 `we open --rc` turns it on for one open. Either only matters when repair
 starts the session: a session that is already live keeps the claude it
