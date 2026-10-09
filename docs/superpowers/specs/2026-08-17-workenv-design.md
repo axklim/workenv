@@ -295,7 +295,8 @@ worktree gets its own environment. A worktree can only be on one branch.
 
 ```
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
-                   [--rc] [--prompt TEXT] [--host H] [--no-terminal]
+                   [--rc] [--model M] [--effort E] [--prompt TEXT]
+                   [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
@@ -331,8 +332,10 @@ ignored, so re-running a command from shell history still attaches.
   or `--name` keeps its own); with Remote Control on, `--remote-control
   <session>` is appended too, so the name the session is reachable under
   from another device is the same one (same rule: a `claude_cmd` that
-  passes `--remote-control` itself keeps its own); with `--prompt`, the
-  text goes last, shell-quoted, as claude's positional first prompt;
+  passes `--remote-control` itself keeps its own); with `--model` or
+  `--effort`, `--model <name>` / `--effort <level>` are appended,
+  shell-quoted (same rule again); with `--prompt`, the text goes last,
+  shell-quoted, as claude's positional first prompt;
 - branch renamed inside the worktree → the stored branch is refreshed.
 
 **New branches start from a fresh default branch.** A branch that exists
@@ -358,6 +361,15 @@ prompt, so a session started for another agent starts working at once. Like
 repair alike. A live session keeps the claude it runs and is not typed into;
 since a dropped task should not go unnoticed, `open` then prints a one-line
 note to stderr that `--prompt` was ignored. `attach` does not define it.
+
+**Model and effort.** `we open --model <name>` and `--effort <level>` pick
+claude's model and reasoning effort for one environment, where `claude_cmd`
+is global. Like `--prompt` they apply only when repair starts the session;
+on a live one they are named in the same stderr note as an ignored
+`--prompt` (one line, e.g. `--model, --prompt ignored`). Values pass through
+verbatim — `we` does not validate them, claude does. A `claude_cmd` that
+passes `--model` or `--effort` itself keeps its own value. `attach` does not
+define either.
 
 **Adoption.** A live tmux session with the target name is reused only if it
 carries `@workenv`. An untagged session of the same name is someone else's,
@@ -438,8 +450,9 @@ ID  PROJECT  SESSION                                       STATE              RE
 ## Remote hosts
 
 `--host devbox` runs the same command over ssh with `--no-terminal` and the
-creation overrides, `--rc` and `--prompt` passed through — the prompt
-shell-quoted, since ssh joins its arguments into one remote command line —
+creation overrides, `--rc`, `--model`, `--effort` and `--prompt` passed
+through — model, effort and prompt shell-quoted, since ssh joins its
+arguments into one remote command line —
 parses the `WE_SESSION=` marker, and opens a local Ghostty running `ssh -t
 devbox tmux attach-session -t <session>`. `remote_control` is read from the remote host's config, since
 that is the `we` starting claude.
@@ -484,8 +497,8 @@ runner, asserting exact argv and the persisted registry:
 - **we** — each resolution path above; claude running versus a shell; issue and PR converging on one
   environment; adoption of an existing worktree; refusal to adopt an untagged
   session; repair of a missing worktree and session, with Remote Control
-  from the config or `--rc` and with an initial prompt; a prompt ignored by
-  a live session; branch drift; placement
+  from the config or `--rc`, with an initial prompt and with a model and
+  effort; a prompt, model and effort ignored by a live session; branch drift; placement
   (default template, a custom `worktree_path`, `--wt` name and path);
   delete semantics; aliases in `--repo` and as a target of open, attach,
   show and delete, naming a new environment but leaving an existing one's

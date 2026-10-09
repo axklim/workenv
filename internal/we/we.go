@@ -69,8 +69,11 @@ type OpenOptions struct {
 	RemoteControl bool
 	// Prompt is passed to claude as its first prompt when the session is
 	// started; a session that is already live is reported back instead
-	// (OpenResult.PromptIgnored).
+	// (OpenResult.SessionFlagsIgnored).
 	Prompt string
+	// Model and Effort become claude's --model and --effort when the
+	// session is started; like Prompt, a live session reports them back.
+	Model, Effort string
 }
 
 type OpenResult struct {
@@ -79,7 +82,7 @@ type OpenResult struct {
 	WorktreePath, RepoPath   string
 	Created                  bool
 	IgnoredOverrides         []string // e.g. ["--branch", "--wt"]
-	PromptIgnored            bool     // the session was already live
+	SessionFlagsIgnored      []string // e.g. ["--model", "--prompt"]: the session was already live
 	// Base is where a branch created by this open started; zero when no
 	// branch was created.
 	Base gitx.Base
@@ -133,16 +136,22 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	if err != nil {
 		return OpenResult{}, err
 	}
-	base, started, err := e.repair(env, created, opts.RemoteControl || e.Cfg.RemoteControl, opts.Prompt)
+	base, started, err := e.repair(env, created, launch{
+		RemoteControl: opts.RemoteControl || e.Cfg.RemoteControl,
+		Model:         opts.Model, Effort: opts.Effort, Prompt: opts.Prompt,
+	})
 	if err != nil {
 		return OpenResult{}, err
 	}
 	if err := st.Save(); err != nil {
 		return OpenResult{}, err
 	}
-	var ignored []string
+	var ignored, sessionIgnored []string
 	if !created {
 		ignored = ignoredOverrides(opts)
+	}
+	if !started {
+		sessionIgnored = ignoredSessionFlags(opts)
 	}
 	if !opts.NoTerminal {
 		if err := e.showInTerminal(env.TmuxSession); err != nil {
@@ -152,7 +161,7 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	return OpenResult{
 		ID: env.ID, Project: env.Project, Branch: env.Branch, Session: env.TmuxSession,
 		WorktreePath: env.WorktreePath, RepoPath: env.RepoPath, Created: created,
-		IgnoredOverrides: ignored, PromptIgnored: opts.Prompt != "" && !started, Base: base,
+		IgnoredOverrides: ignored, SessionFlagsIgnored: sessionIgnored, Base: base,
 	}, nil
 }
 
@@ -168,6 +177,23 @@ func ignoredOverrides(opts OpenOptions) []string {
 	}
 	if opts.Wt != "" {
 		out = append(out, "--wt")
+	}
+	return out
+}
+
+// ignoredSessionFlags names the flags that shape a started claude the
+// caller passed, for reporting when the session was already live. --rc is
+// left out: it says nothing on a live session.
+func ignoredSessionFlags(opts OpenOptions) []string {
+	var out []string
+	if opts.Model != "" {
+		out = append(out, "--model")
+	}
+	if opts.Effort != "" {
+		out = append(out, "--effort")
+	}
+	if opts.Prompt != "" {
+		out = append(out, "--prompt")
 	}
 	return out
 }
@@ -290,12 +316,12 @@ func (e *Env) renderPlacement(sp spec, project, branch string) (string, error) {
 // remoteControl and prompt shape the claude a session it starts runs;
 // started reports whether it started one, base where a branch it created
 // started.
-func (e *Env) repair(env *state.Env, created, remoteControl bool, prompt string) (base gitx.Base, started bool, err error) {
+func (e *Env) repair(env *state.Env, created bool, l launch) (base gitx.Base, started bool, err error) {
 	base, err = e.repairWorktree(env)
 	if err != nil {
 		return gitx.Base{}, false, err
 	}
-	started, err = e.repairSession(env, created, remoteControl, prompt)
+	started, err = e.repairSession(env, created, l)
 	if err != nil {
 		return gitx.Base{}, false, err
 	}
@@ -332,7 +358,7 @@ func (e *Env) repairWorktree(env *state.Env) (gitx.Base, error) {
 // helps; for an environment that already exists, --session cannot change
 // anything (it is a creation-only override, ignored on a hit), so the
 // message instead points at the conflicting session itself.
-func (e *Env) repairSession(env *state.Env, created, remoteControl bool, prompt string) (started bool, err error) {
+func (e *Env) repairSession(env *state.Env, created bool, l launch) (started bool, err error) {
 	if e.tmux().Has(env.TmuxSession) {
 		if !e.tmux().IsWorkenv(env.TmuxSession) {
 			if created {
@@ -345,24 +371,38 @@ func (e *Env) repairSession(env *state.Env, created, remoteControl bool, prompt 
 	if err := e.tmux().New(env.TmuxSession, env.WorktreePath, env.ID); err != nil {
 		return false, err
 	}
-	return true, e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, remoteControl, prompt))
+	return true, e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, l))
 }
 
-// claudeCommand is cmd with --name <session> appended and, when
-// remoteControl, --remote-control <session> as well, so the name claude
+// launch is what shapes claude when repair starts the session.
+type launch struct {
+	RemoteControl bool
+	Model, Effort string
+	Prompt        string
+}
+
+// claudeCommand is cmd with --name <session> appended and, when Remote
+// Control is on, --remote-control <session> as well, so the name claude
 // shows and the name it is reachable under both match the tmux session. A
-// cmd that already passes either flag keeps its own value for it. A
-// non-empty prompt goes last, shell-quoted, as claude's positional prompt.
-func claudeCommand(cmd, session string, remoteControl bool, prompt string) string {
+// non-empty model or effort is appended shell-quoted as --model / --effort.
+// A cmd that already passes any of these flags keeps its own value for it.
+// A non-empty prompt goes last, shell-quoted, as claude's positional prompt.
+func claudeCommand(cmd, session string, l launch) string {
 	name := naming.Sanitize(session)
 	if !hasFlag(cmd, "-n", "--name") {
 		cmd += " --name " + name
 	}
-	if remoteControl && !hasFlag(cmd, "--remote-control") {
+	if l.RemoteControl && !hasFlag(cmd, "--remote-control") {
 		cmd += " --remote-control " + name
 	}
-	if prompt != "" {
-		cmd += " " + execx.ShellQuote(prompt)
+	if l.Model != "" && !hasFlag(cmd, "--model") {
+		cmd += " --model " + execx.ShellQuote(l.Model)
+	}
+	if l.Effort != "" && !hasFlag(cmd, "--effort") {
+		cmd += " --effort " + execx.ShellQuote(l.Effort)
+	}
+	if l.Prompt != "" {
+		cmd += " " + execx.ShellQuote(l.Prompt)
 	}
 	return cmd
 }

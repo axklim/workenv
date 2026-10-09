@@ -51,7 +51,8 @@ works — the binary then reports its version as `dev`, since nothing stamped it
 
 ```
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
-                   [--rc] [--prompt TEXT] [--host H] [--no-terminal]
+                   [--rc] [--model M] [--effort E] [--prompt TEXT]
+                   [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
@@ -82,7 +83,9 @@ them, and `open` says so on stderr when it ignored them. `--rc` starts
 up from another device; `remote_control = true` does it for every environment.
 `--prompt "<text>"` gives `claude` its first prompt when the session is
 started, so it gets to work without anyone typing; a session that is already
-running is left alone, with a note on stderr.
+running is left alone, with a note on stderr. `--model <name>` and
+`--effort <level>` pass the same claude flags for this environment only, on
+the same terms as `--prompt`.
 
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
 for when you're not standing in it: a bare name is an alias or is looked up

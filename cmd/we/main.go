@@ -73,6 +73,8 @@ type openCmd struct {
 	overrides
 	RC     bool   `long:"rc" description:"start claude with Remote Control, named after the session (overrides remote_control)"`
 	Prompt string `long:"prompt" value-name:"TEXT" description:"first prompt for claude when the session is started"`
+	Model  string `long:"model" value-name:"NAME" description:"claude --model when the session is started"`
+	Effort string `long:"effort" value-name:"LEVEL" description:"claude --effort when the session is started"`
 }
 
 // overrides are the creation-only flags: they decide what a new environment
@@ -143,6 +145,9 @@ hit, open prints a note to stderr saying they were ignored.
 --prompt <text> is claude's first prompt when open starts the session, on
 creation or when repair restarts a missing one. A session that is already
 running is left alone, and open says on stderr that --prompt was ignored.
+--model <name> and --effort <level> work the same way: passed to claude
+verbatim when open starts the session, reported as ignored otherwise. A
+claude_cmd that passes either flag itself keeps its own value.
 
 --host <host> runs the same command over ssh (creation overrides passed
 through) and, for open/attach, opens a local Ghostty attached to the
@@ -313,12 +318,13 @@ func runOpen(env *we.Env, cmd string, c openCmd, attachOnly bool) error {
 	}
 
 	if c.Host != "" {
-		return openRemote(env, cmd, c.Host, raw, c.Repo, c.Branch, c.Session, c.Wt, c.RC, c.Prompt, c.NoTerminal)
+		return openRemote(env, cmd, raw, c)
 	}
 
 	res, err := env.Open(we.OpenOptions{
 		Target: tgt, Repo: c.Repo, Branch: c.Branch, Session: c.Session, Wt: c.Wt,
 		AttachOnly: attachOnly, NoTerminal: c.NoTerminal, RemoteControl: c.RC, Prompt: c.Prompt,
+		Model: c.Model, Effort: c.Effort,
 	})
 	if err != nil {
 		return err
@@ -329,8 +335,8 @@ func runOpen(env *we.Env, cmd string, c openCmd, attachOnly bool) error {
 
 // printOpenResult prints the human summary, then the machine-readable
 // WE_SESSION= line the remote flow parses; a failed fetch of the base,
-// ignored creation overrides and an ignored --prompt go to stderr, one line
-// each, after everything else.
+// ignored creation overrides and ignored session flags (--model, --effort,
+// --prompt) go to stderr, one line each, after everything else.
 func printOpenResult(res we.OpenResult) {
 	verb := "found"
 	if res.Created {
@@ -353,17 +359,19 @@ func printOpenResult(res we.OpenResult) {
 		fmt.Fprintf(os.Stderr, "we: environment %d already exists; %s ignored\n",
 			res.ID, strings.Join(res.IgnoredOverrides, ", "))
 	}
-	if res.PromptIgnored {
-		fmt.Fprintf(os.Stderr, "we: session %s is already running; --prompt ignored\n", res.Session)
+	if len(res.SessionFlagsIgnored) > 0 {
+		fmt.Fprintf(os.Stderr, "we: session %s is already running; %s ignored\n",
+			res.Session, strings.Join(res.SessionFlagsIgnored, ", "))
 	}
 }
 
 // openRemote runs open/attach on host over ssh — --no-terminal first, then
-// whichever of --repo, --branch, --session, --wt, --rc, --prompt were
-// given, in that order — prints what it printed, and attaches a local
-// terminal to the resulting session unless noTerminal was requested locally
-// too. ssh joins its arguments into one remote shell command, so the prompt
-// is shell-quoted to arrive as a single argument.
+// whichever of --repo, --branch, --session, --wt, --rc, --model, --effort,
+// --prompt were given, in that order — prints what it printed, and attaches
+// a local terminal to the resulting session unless --no-terminal was
+// requested locally too. ssh joins its arguments into one remote shell
+// command, so model, effort and prompt are shell-quoted to arrive as single
+// arguments.
 //
 // It uses OutputPassStderr rather than Output: stdout must be captured so
 // the WE_SESSION= marker can be parsed out of it, but the remote's stderr
@@ -371,25 +379,32 @@ func printOpenResult(res we.OpenResult) {
 // — has to reach the user directly. Output only surfaces stderr inside the
 // error it returns, so on a successful (non-error) remote call that note
 // would otherwise be silently dropped.
-func openRemote(env *we.Env, cmd, host, rawTarget, repo, branch, session, wt string, rc bool, prompt string, noTerminal bool) error {
+func openRemote(env *we.Env, cmd, rawTarget string, c openCmd) error {
+	host := c.Host
 	remote := []string{host, env.Cfg.RemoteWe, cmd, rawTarget, "--no-terminal"}
-	if repo != "" {
-		remote = append(remote, "--repo", repo)
+	if c.Repo != "" {
+		remote = append(remote, "--repo", c.Repo)
 	}
-	if branch != "" {
-		remote = append(remote, "--branch", branch)
+	if c.Branch != "" {
+		remote = append(remote, "--branch", c.Branch)
 	}
-	if session != "" {
-		remote = append(remote, "--session", session)
+	if c.Session != "" {
+		remote = append(remote, "--session", c.Session)
 	}
-	if wt != "" {
-		remote = append(remote, "--wt", wt)
+	if c.Wt != "" {
+		remote = append(remote, "--wt", c.Wt)
 	}
-	if rc {
+	if c.RC {
 		remote = append(remote, "--rc")
 	}
-	if prompt != "" {
-		remote = append(remote, "--prompt", execx.ShellQuote(prompt))
+	if c.Model != "" {
+		remote = append(remote, "--model", execx.ShellQuote(c.Model))
+	}
+	if c.Effort != "" {
+		remote = append(remote, "--effort", execx.ShellQuote(c.Effort))
+	}
+	if c.Prompt != "" {
+		remote = append(remote, "--prompt", execx.ShellQuote(c.Prompt))
 	}
 	out, err := env.R.OutputPassStderr("", "ssh", remote...)
 	if out != "" {
@@ -402,7 +417,7 @@ func openRemote(env *we.Env, cmd, host, rawTarget, repo, branch, session, wt str
 	if sess == "" {
 		return fmt.Errorf("remote we did not report a session (is %q installed on %s?)", env.Cfg.RemoteWe, host)
 	}
-	if noTerminal {
+	if c.NoTerminal {
 		fmt.Printf("attach with: ssh -t %s tmux attach-session -t %s\n", host, sess)
 		return nil
 	}
