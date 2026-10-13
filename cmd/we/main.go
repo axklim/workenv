@@ -149,6 +149,13 @@ running is left alone, and open says on stderr that --prompt was ignored.
 verbatim when open starts the session, reported as ignored otherwise. They
 override the same flag in claude_cmd.
 
+--rc, --model and --effort are recorded with the environment and apply
+again whenever open or attach recreates its session, after a reboot say;
+flags passed on that open replace them. A recreated session continues the
+conversation last run in its worktree (claude --continue), or starts fresh
+when there is none. ls reads interrupted instead of none when the session
+ended without claude exiting: a reboot, a crash, a killed tmux server.
+
 --host <host> runs the same command over ssh (creation overrides passed
 through) and, for open/attach, opens a local Ghostty attached to the
 resulting session. The remote host needs we installed; its path is

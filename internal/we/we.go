@@ -17,10 +17,12 @@
 package we
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,13 +68,15 @@ type OpenOptions struct {
 	// RemoteControl starts claude with Remote Control for this open,
 	// whatever the config says. It only matters when the session is
 	// started: a session that is already live keeps the claude it runs.
+	// A session started with it records it, like Model and Effort.
 	RemoteControl bool
 	// Prompt is passed to claude as its first prompt when the session is
 	// started; a session that is already live is reported back instead
 	// (OpenResult.SessionFlagsIgnored).
 	Prompt string
 	// Model and Effort become claude's --model and --effort when the
-	// session is started; like Prompt, a live session reports them back.
+	// session is started, replacing the recorded ones; like Prompt, a live
+	// session reports them back.
 	Model, Effort string
 }
 
@@ -105,6 +109,7 @@ type Item struct {
 	Issues, PRs              []string
 	Exists, Current          bool
 	Done                     bool // finished: worktree missing, every PR merged or closed
+	Interrupted              bool // no session, and claude never exited from the last one we started
 	CreatedAt                time.Time
 }
 
@@ -136,12 +141,20 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 	if err != nil {
 		return OpenResult{}, err
 	}
-	base, started, err := e.repair(env, created, launch{
-		RemoteControl: opts.RemoteControl || e.Cfg.RemoteControl,
-		Model:         opts.Model, Effort: opts.Effort, Prompt: opts.Prompt,
-	})
+	l := launch{
+		RemoteControl: opts.RemoteControl || env.RemoteControl || e.Cfg.RemoteControl,
+		Model:         cmp.Or(opts.Model, env.Model), Effort: cmp.Or(opts.Effort, env.Effort),
+		Prompt: opts.Prompt, Continue: !created,
+	}
+	base, started, err := e.repair(env, created, l)
 	if err != nil {
 		return OpenResult{}, err
+	}
+	if started {
+		// The config's remote_control is not recorded: it still applies on
+		// its own, and turning it off must reach every environment.
+		env.RemoteControl = env.RemoteControl || opts.RemoteControl
+		env.Model, env.Effort = l.Model, l.Effort
 	}
 	if err := st.Save(); err != nil {
 		return OpenResult{}, err
@@ -371,7 +384,24 @@ func (e *Env) repairSession(env *state.Env, created bool, l launch) (started boo
 	if err := e.tmux().New(env.TmuxSession, env.WorktreePath, env.ID); err != nil {
 		return false, err
 	}
-	return true, e.tmux().RunInFirstWindow(env.TmuxSession, claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, l))
+	marker := e.runningMarker(env.ID)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		return false, err
+	}
+	cmd := claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, l) + "; rm -f " + execx.ShellQuote(marker)
+	return true, e.tmux().RunInFirstWindow(env.TmuxSession, cmd)
+}
+
+// runningMarker is the file that exists from the moment repair starts
+// claude in env id's session until claude exits: the command typed into
+// the first window removes it. A reboot, a crash or a killed tmux server
+// ends the session without running that, which is how List tells an
+// interrupted environment from a finished one.
+func (e *Env) runningMarker(id int) string {
+	return filepath.Join(filepath.Dir(e.StatePath), "running", strconv.Itoa(id))
 }
 
 // launch is what shapes claude when repair starts the session.
@@ -379,6 +409,9 @@ type launch struct {
 	RemoteControl bool
 	Model, Effort string
 	Prompt        string
+	// Continue resumes the conversation last run in the worktree: the
+	// environment has had a session before.
+	Continue bool
 }
 
 // claudeCommand is cmd with --name <session> appended and, when Remote
@@ -388,6 +421,11 @@ type launch struct {
 // non-empty model or effort is appended shell-quoted as --model / --effort,
 // replacing cmd's own: it was asked for this one environment. A non-empty
 // prompt goes last, shell-quoted, as claude's positional prompt.
+//
+// With Continue, claude is started with --continue, and the same command
+// without it follows after ||: claude --continue exits with an error when
+// the directory has no conversation to continue. A cmd that passes
+// --continue or --resume itself is left to it.
 func claudeCommand(cmd, session string, l launch) string {
 	name := naming.Sanitize(session)
 	if !hasFlag(cmd, "-n", "--name") {
@@ -402,10 +440,14 @@ func claudeCommand(cmd, session string, l launch) string {
 	if l.Effort != "" {
 		cmd = withoutFlag(cmd, "--effort") + " --effort " + execx.ShellQuote(l.Effort)
 	}
+	prompt := ""
 	if l.Prompt != "" {
-		cmd += " " + execx.ShellQuote(l.Prompt)
+		prompt = " " + execx.ShellQuote(l.Prompt)
 	}
-	return cmd
+	if l.Continue && !hasFlag(cmd, "-c", "--continue", "-r", "--resume") {
+		return cmd + " --continue" + prompt + " || " + cmd + prompt
+	}
+	return cmd + prompt
 }
 
 // hasFlag reports whether cmd passes any of flags, as its own word or in
@@ -516,6 +558,8 @@ func (e *Env) teardown(env *state.Env, opts DeleteOptions) error {
 			fmt.Fprintf(os.Stderr, "we: tmux session %q is not a workenv session; leaving it running\n", env.TmuxSession)
 		}
 	}
+	// Stopped on purpose: not interrupted.
+	_ = os.Remove(e.runningMarker(env.ID))
 	if opts.KeepWorktree {
 		return nil
 	}
@@ -630,6 +674,10 @@ func (e *Env) toItem(env *state.Env, sessions []tmuxx.Session) (Item, bool) {
 			item.ClaudeRunning = claudeRunning(s.Command)
 			break
 		}
+	}
+	if item.SessionState == "none" {
+		_, err := os.Stat(e.runningMarker(env.ID))
+		item.Interrupted = err == nil
 	}
 	changed := false
 	if _, err := os.Stat(env.WorktreePath); err == nil {

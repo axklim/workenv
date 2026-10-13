@@ -8,8 +8,8 @@ Worked examples, in the order a day tends to go. Paths assume
   repository, or nothing at all
 - [Coming back](#coming-back) — finding an environment again, and renaming its
   branch
-- [When something breaks](#when-something-breaks) — a reboot, a deleted
-  worktree
+- [When something breaks](#when-something-breaks) — a reboot, interrupted
+  environments, a deleted worktree
 - [Placement and cleanup](#placement-and-cleanup) — one-off paths, tearing down
 - [On another machine](#on-another-machine) — `--host`
 - [From another device](#from-another-device) — `--rc`
@@ -150,8 +150,29 @@ we open 7
 ```
 
 The tmux server is gone, so the session is recreated, tagged, and `claude`
-started in its first window. The worktree is untouched, and the branch is
-whatever git says it is.
+started in its first window with `--continue`: it picks up the conversation
+that was running in the worktree, or starts fresh if there is none. It comes
+back with the `--rc`, `--model` and `--effort` the environment was started
+with, since the registry records them; a flag passed to this `open` replaces
+the recorded one. `we attach 7` does the same. The worktree is untouched, and
+the branch is whatever git says it is.
+
+A worktree that is the project home, shared with work done by hand, continues
+whatever conversation was last run in that checkout.
+
+### Bring back what the reboot interrupted
+
+```
+we ls        # 7  trade  trade-review-claude-md-file  interrupted  #59 PR#61
+we ls --json # "state": "none", "interrupted": true
+we open 7 --no-terminal
+```
+
+`interrupted` replaces `none` for an environment whose session ended while
+claude was still running in it: a reboot, a crash, a killed tmux server.
+One whose claude exited, or that `we delete --keep-worktree` stopped, stays
+`none`. So after a reboot, `we open <id> --no-terminal` for each
+`interrupted` environment brings back exactly what was running.
 
 ### After the worktree is deleted behind your back
 
@@ -226,7 +247,9 @@ as `--name`, so the session appears under its tmux name in the Remote
 Control list of a phone or laptop, with no terminal attached here. A session
 started by another agent on this machine can be picked up that way. Set
 `remote_control = true` to do it for every environment; `--rc` only matters
-when the session is started, so a live one is left as it is.
+when the session is started, so a live one is left as it is. The environment
+remembers `--rc`, so its session comes back with Remote Control after a
+reboot.
 
 ## Handing work to a new session
 
@@ -254,4 +277,5 @@ we open https://github.com/axklim/trade/issues/59 --no-terminal \
 written, so whatever names `claude` accepts work here. If `claude_cmd`
 already passes `--model` or `--effort`, the flag given to `open` replaces it. Like `--prompt`,
 both only reach a session that `open` starts; on a running one `open` says on
-stderr that they were ignored.
+stderr that they were ignored. Unlike `--prompt`, they are remembered: a
+session recreated later, by `open` or `attach`, starts with them again.

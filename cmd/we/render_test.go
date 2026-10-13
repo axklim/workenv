@@ -280,7 +280,7 @@ func TestRenderJSON(t *testing.T) {
 		t.Fatalf("got %d objects, want 2:\n%s", len(got), buf.String())
 	}
 
-	wantKeys := []string{"branch", "claude_running", "created_at", "done", "id", "issues", "pane_command", "project", "prs",
+	wantKeys := []string{"branch", "claude_running", "created_at", "done", "id", "interrupted", "issues", "pane_command", "project", "prs",
 		"repo_path", "session", "state", "worktree_missing", "worktree_path"}
 	for i, obj := range got {
 		var keys []string
@@ -305,6 +305,7 @@ func TestRenderJSON(t *testing.T) {
 		"worktree_path":    "/Users/u/projects/trade.review_claude-file",
 		"worktree_missing": false,
 		"done":             false,
+		"interrupted":      false,
 		"repo_path":        "/Users/u/projects/trade",
 		"created_at":       "2026-08-16T18:12:03Z",
 	}
@@ -347,6 +348,22 @@ func TestRenderJSONDone(t *testing.T) {
 	}
 }
 
+func TestRenderJSONInterrupted(t *testing.T) {
+	items := plainItems("/Users/u")
+	items[1].SessionState, items[1].PaneCommand, items[1].Interrupted = "none", "", true
+	var buf bytes.Buffer
+	if err := renderJSON(&buf, items); err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got[0]["interrupted"] != false || got[1]["interrupted"] != true || got[1]["state"] != "none" {
+		t.Errorf("interrupted, interrupted, state = %v, %v, %v", got[0]["interrupted"], got[1]["interrupted"], got[1]["state"])
+	}
+}
+
 // TestStateTextDone: a finished environment reads "done", keeping a live
 // session's state after it, since gc will kill that session.
 func TestStateTextDone(t *testing.T) {
@@ -358,6 +375,8 @@ func TestStateTextDone(t *testing.T) {
 		{we.Item{SessionState: "detached", PaneCommand: "zsh", Done: true}, "done, detached (zsh)"},
 		{we.Item{SessionState: "detached", PaneCommand: "zsh"}, "detached (zsh)"},
 		{we.Item{SessionState: "none"}, "none"},
+		{we.Item{SessionState: "none", Interrupted: true}, "interrupted"},
+		{we.Item{SessionState: "none", Interrupted: true, Done: true}, "done"},
 	}
 	for _, c := range cases {
 		if got := stateText(c.it); got != c.want {

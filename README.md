@@ -85,7 +85,10 @@ up from another device; `remote_control = true` does it for every environment.
 started, so it gets to work without anyone typing; a session that is already
 running is left alone, with a note on stderr. `--model <name>` and
 `--effort <level>` pass the same claude flags for this environment only, on
-the same terms as `--prompt`.
+the same terms as `--prompt`. `--rc`, `--model` and `--effort` are remembered:
+a session recreated after a reboot gets them again, and continues its
+conversation with `claude --continue`. `we ls` shows `interrupted` for an
+environment whose session died while claude was still running in it.
 
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
 for when you're not standing in it: a bare name is an alias or is looked up

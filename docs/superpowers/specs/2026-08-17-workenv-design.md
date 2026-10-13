@@ -62,7 +62,9 @@ XDG places "state that should persist between restarts" here.
       "repo_path": "/Users/u/projects/trade",
       "issues": ["https://github.com/axklim/trade/issues/59"],
       "prs": ["https://github.com/axklim/trade/pull/61"],
-      "created_at": "2026-08-16T18:12:03Z"
+      "created_at": "2026-08-16T18:12:03Z",
+      "remote_control": true,
+      "model": "opus"
     }
   ]
 }
@@ -80,6 +82,23 @@ Fields:
   `https://github.com/<owner>/<repo>/(issues|pull)/<n>`, no trailing slash.
   The repository travels with the number, so links to *another* repository
   are kept rather than dropped.
+- **remote_control**, **model**, **effort** — the launch flags (`--rc`,
+  `--model`, `--effort`) the session was last started with, omitted when
+  unset. They are written whenever `we` starts the session, a flag passed on
+  that `open` replacing the recorded value, and applied again whenever repair
+  recreates it (see *Repair on open*). `remote_control` records only `--rc`:
+  the config's `remote_control` still applies on its own, so turning it off
+  reaches every environment. `--prompt` is not recorded.
+
+**Running markers.** Next to the registry, `running/<id>` exists from the
+moment `we` starts claude in environment `<id>`'s session until claude exits:
+the command typed into the first window ends with `; rm -f <marker>`. A
+reboot, a crash or a killed tmux server ends the session without running
+that, so a marker with no session left means the environment was
+*interrupted* (see *Listing*). `delete` and `gc` remove the marker — a
+session they kill was stopped on purpose. A marker is a file rather than a
+registry field so that claude's exit needs nothing but `rm`: no `we` on the
+pane's `PATH`, and no second writer racing a running `we` for `envs.json`.
 
 Invariants:
 
@@ -335,7 +354,18 @@ ignored, so re-running a command from shell history still attaches.
   passes `--remote-control` itself keeps its own); with `--model` or
   `--effort`, `--model <name>` / `--effort <level>` are appended,
   shell-quoted, replacing the same flag in `claude_cmd`; with `--prompt`, the text goes last,
-  shell-quoted, as claude's positional first prompt;
+  shell-quoted, as claude's positional first prompt. Remote Control, model
+  and effort default to the recorded ones (see *State*), so a recreated
+  session comes back as it was started. For an environment that already
+  existed — a session recreated after a reboot — claude also gets
+  `--continue`, so it picks up the conversation last run in the worktree
+  (Claude Code keys conversations by directory), and the same command without
+  it follows after `||`, since `claude --continue` exits with an error where
+  there is no conversation to continue. A `claude_cmd` that passes
+  `--continue`/`-c` or `--resume`/`-r` itself keeps its own. Finally `; rm -f
+  <running marker>` is appended (see *State*). An environment adopted onto
+  a shared checkout, such as the project home, continues whatever
+  conversation was last run in that checkout;
 - branch renamed inside the worktree → the stored branch is refreshed.
 
 **New branches start from a fresh default branch.** A branch that exists
@@ -352,8 +382,9 @@ commit) after `branch:`, so a stale base is visible.
 **Remote Control** is off unless `remote_control = true` in the config or
 `we open --rc` turns it on for one open. Either only matters when repair
 starts the session: a session that is already live keeps the claude it
-runs, and `--rc` says nothing then. `attach` does not define `--rc`, like
-the creation overrides.
+runs, and `--rc` says nothing then. A session started with `--rc` records
+it, so recreating that session keeps Remote Control on. `attach` does not
+define `--rc`, like the creation overrides.
 
 **Initial prompt.** `we open --prompt "<text>"` hands claude its first
 prompt, so a session started for another agent starts working at once. Like
@@ -370,8 +401,10 @@ on a live one they are named in the same stderr note as an ignored
 verbatim — `we` does not validate them, claude does. Unlike `--name` and
 `--remote-control`, they override the config: a `claude_cmd` that passes
 `--model` or `--effort` has that flag and its value dropped, since the flag
-typed for one environment is the more specific request. `attach` does not
-define either.
+typed for one environment is the more specific request. Both are recorded
+with the session they start, and a later `open` that starts the session
+with a different value replaces it; one ignored by a live session is not
+recorded. `attach` does not define either.
 
 **Adoption.** A live tmux session with the target name is reused only if it
 carries `@workenv`. An untagged session of the same name is someone else's,
@@ -428,6 +461,12 @@ ID  PROJECT  SESSION                                       STATE              RE
   `detached (2.1.295)`. For the same reason "claude is running" is never
   decided by comparing with the word `claude`: a shell (`zsh`, `bash`, `sh`,
   `fish`, `login`) means claude has exited, anything else means it runs.
+- An **interrupted** environment reads `interrupted` in `STATE` instead of
+  `none`: it has no session, but its running marker (see *State*) is still
+  there, so the session ended without claude exiting — a reboot, a crash, a
+  killed tmux server. An environment whose claude exited reads `none`, so
+  after a reboot `interrupted` names exactly the ones to bring back:
+  `we ls --json`, then `we open <id> --no-terminal` for each.
 - A finished environment (see *gc*) reads `done` in `STATE` instead of
   `none`, and `done, detached (zsh)` while its session still lives. Deciding
   that takes the same `gh` calls as gc, made only for rows whose worktree is
@@ -445,7 +484,8 @@ ID  PROJECT  SESSION                                       STATE              RE
   `id`, `project`, `branch`, `session`, `state` (without the command),
   `pane_command` (`""` with no session), `claude_running` (the rule above;
   `false` with no session), `worktree_path`, `worktree_missing`, `done`
-  (finished, the rule above; `state` keeps the tmux value), `repo_path`, `issues`, `prs` (both always arrays),
+  (finished, the rule above; `state` keeps the tmux value), `interrupted`
+  (the rule above; `state` stays `none`), `repo_path`, `issues`, `prs` (both always arrays),
   `created_at` (RFC 3339). Paths are absolute, not `~`-abbreviated. `-l` has
   no effect with it.
 
@@ -500,7 +540,11 @@ runner, asserting exact argv and the persisted registry:
   environment; adoption of an existing worktree; refusal to adopt an untagged
   session; repair of a missing worktree and session, with Remote Control
   from the config or `--rc`, with an initial prompt and with a model and
-  effort; a prompt, model and effort ignored by a live session; branch drift; placement
+  effort; launch flags recorded on start, applied again on a recreated
+  session and replaced by a later flag, but not by one a live session
+  ignored; `--continue` with its fresh fallback; the running marker left on
+  start and removed by delete, and `ls` marking `interrupted`; a prompt,
+  model and effort ignored by a live session; branch drift; placement
   (default template, a custom `worktree_path`, `--wt` name and path);
   delete semantics; aliases in `--repo` and as a target of open, attach,
   show and delete, naming a new environment but leaving an existing one's
@@ -513,7 +557,7 @@ runner, asserting exact argv and the persisted registry:
   to parse or render; the `[aliases]` table and its rejected forms.
 - **tmuxx** — the first pane's command per session.
 - **cmd** — listing layout, TTY vs piped rendering, `show`, the `--json`
-  keys and the empty array, the `done` state, `gc` output and `--host`.
+  keys and the empty array, the `done` and `interrupted` states, `gc` output and `--host`.
 
 ## Use cases
 
@@ -633,8 +677,12 @@ we open 7
 ```
 
 The tmux server is gone, so the session is recreated, tagged, and `claude`
-started in its first window. The worktree is untouched, and the branch is
-whatever git says it is.
+started in its first window with `--continue`, picking up the conversation
+it was in, and with the `--rc`, `--model` and `--effort` the environment was
+started with. The worktree is untouched, and the branch is whatever git says
+it is. Before that, `we ls` shows the environments whose claude was still
+running at the reboot as `interrupted`, and the ones that had finished as
+`none`.
 
 ### After the worktree is deleted behind your back
 

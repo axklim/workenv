@@ -110,13 +110,16 @@ func dirLine(it we.Item) string {
 // stateText is STATE as ls and show print it: the tmux state, followed by
 // the first pane's command when there is a session — "detached (zsh)". A
 // finished environment reads "done", followed by its session if one is
-// still live.
+// still live; an interrupted one reads "interrupted" instead of "none".
 func stateText(it we.Item) string {
 	s := it.SessionState
 	if it.PaneCommand != "" {
 		s += " (" + it.PaneCommand + ")"
 	}
 	if !it.Done {
+		if it.Interrupted {
+			return "interrupted"
+		}
 		return s
 	}
 	if it.SessionState == "none" {
@@ -251,6 +254,7 @@ type jsonItem struct {
 	WorktreePath    string    `json:"worktree_path"`
 	WorktreeMissing bool      `json:"worktree_missing"`
 	Done            bool      `json:"done"`
+	Interrupted     bool      `json:"interrupted"`
 	RepoPath        string    `json:"repo_path"`
 	Issues          []string  `json:"issues"`
 	PRs             []string  `json:"prs"`
@@ -265,7 +269,7 @@ func renderJSON(w io.Writer, items []we.Item) error {
 		out = append(out, jsonItem{
 			ID: it.ID, Project: it.Project, Branch: it.Branch, Session: it.Session,
 			State: it.SessionState, PaneCommand: it.PaneCommand, ClaudeRunning: it.ClaudeRunning,
-			WorktreePath: it.WorktreePath, WorktreeMissing: !it.Exists, Done: it.Done,
+			WorktreePath: it.WorktreePath, WorktreeMissing: !it.Exists, Done: it.Done, Interrupted: it.Interrupted,
 			RepoPath: it.RepoPath, Issues: nonNil(it.Issues), PRs: nonNil(it.PRs),
 			CreatedAt: it.CreatedAt,
 		})
