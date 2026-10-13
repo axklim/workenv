@@ -77,7 +77,8 @@ func TestRunOpenStartsClaudeWithRemoteControl(t *testing.T) {
 			t.Fatalf("runOpen: %v", err)
 		}
 	})
-	want := "tmux send-keys -t proj-x claude --name proj-x --remote-control proj-x Enter"
+	claude := "claude --name proj-x --remote-control proj-x"
+	want := "tmux send-keys -t proj-x " + claude + " --continue || " + claude + "; rm -f '" + filepath.Join(root, "running", "1") + "' Enter"
 	if !slices.Contains(fake.Joined(), want) {
 		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
 	}

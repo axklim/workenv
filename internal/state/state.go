@@ -30,6 +30,11 @@ type Env struct {
 	Issues       []string  `json:"issues,omitempty"`
 	PRs          []string  `json:"prs,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
+	// RemoteControl, Model and Effort are the launch flags the session was
+	// last started with, applied again whenever it is recreated.
+	RemoteControl bool   `json:"remote_control,omitempty"`
+	Model         string `json:"model,omitempty"`
+	Effort        string `json:"effort,omitempty"`
 }
 
 // Store is the registry: the file it lives in plus its decoded contents.

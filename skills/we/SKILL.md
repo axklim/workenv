@@ -54,7 +54,10 @@ target gets its own branch and worktree beside the checkout
 
 These apply only when `we` starts the session. On an environment that is
 already running, `open` leaves it alone and says on stderr which flags it
-ignored. `attach` does not accept them.
+ignored. `attach` does not accept them. `--rc`, `--model` and `--effort` are
+recorded when they start a session, and a session `open` or `attach`
+recreates later starts with them again and with `claude --continue`, so it
+resumes its conversation; `--prompt` is not recorded.
 
 - `--branch NAME` — instead of the derived branch: issue title slug, PR head
   (`pr-<n>` for a fork's PR), default branch, or the plain name itself.
@@ -89,7 +92,9 @@ prints `base: origin/<default> <sha>`, and warns on stderr if it was offline.
 
 **Versions.** `--rc`, `--prompt`, `remote_control`, `ls --json`, the claude
 state in `ls`, `gc` and `[aliases]` arrived in 0.2.0; `--model` and
-`--effort` arrive after 0.2.3; everything else here is older. `we version` says which you have, `we open --help` which flags it knows.
+`--effort` arrived in 0.2.4; recorded launch flags, `--continue` on a
+recreated session and the `interrupted` state arrive after 0.2.4; everything
+else here is older. `we version` says which you have, `we open --help` which flags it knows.
 
 ## Reading back
 
@@ -101,6 +106,10 @@ anything else, including a version such as `2.1.295`, means it still runs.
 - `attached` — a terminal is on the session.
 - `detached` — the session is alive, nobody is looking at it.
 - `none` — no tmux session; the next `open` or `attach` recreates it.
+- `interrupted` — no tmux session, but claude was still running when it
+  ended: a reboot, a crash, a killed tmux server (`"interrupted": true` in
+  `--json`, `state` stays `none`). After a reboot, `we open <id>
+  --no-terminal` each of these and nothing else.
 - `done` — every linked PR is merged or closed and the worktree is gone
   (`"done": true` in `--json`). `we gc` deletes these, killing a live session;
   environments without a PR never are. Without `gh`, `ls` shows no `done` and
@@ -114,7 +123,7 @@ keys (`id`, `session`, `state`, `worktree_path`, `worktree_missing`, `prs`, …)
 
 The registry (`~/.local/state/workenv/envs.json`) knows: id, project, branch,
 session name, worktree and repository path, linked issue and PR URLs, creation
-time. The branch is refreshed from git on every `open` and `ls`. It does not
+time, and the `--rc`, `--model` and `--effort` the session was started with. The branch is refreshed from git on every `open` and `ls`. It does not
 know what claude is doing or whether it still runs inside the session, whether
 the branch is pushed, the PR's state, or anything on another host. Ask `gh`,
 `git` or the session itself for those.

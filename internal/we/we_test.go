@@ -32,6 +32,17 @@ func newTestEnv(t *testing.T, fake *execx.Fake) (*Env, string) {
 	return &Env{Cfg: cfg, R: fake, GOOS: "darwin", Cwd: root, StatePath: filepath.Join(root, "state", "envs.json")}, repo
 }
 
+// startLine is the send-keys call that starts claude in session: the claude
+// command, then removal of environment id's running marker once it exits.
+func startLine(env *Env, session string, id int, claude string) string {
+	return "tmux send-keys -t " + session + " " + claude + "; rm -f " + execx.ShellQuote(env.runningMarker(id)) + " Enter"
+}
+
+// resumed is cmd as repair types it for an environment that has run
+// before: with --continue, and cmd again for a worktree with no
+// conversation to continue.
+func resumed(cmd string) string { return cmd + " --continue || " + cmd }
+
 func hasCall(f *execx.Fake, want string) bool {
 	return slices.ContainsFunc(f.Joined(), func(c string) bool {
 		return strings.HasPrefix(c, want)
@@ -121,7 +132,7 @@ func TestOpenIssueCreatesEverything(t *testing.T) {
 		"git worktree add -b add-kafka-publisher " + wtPath + " main",
 		"tmux new-session -d -s proj-add-kafka-publisher -c " + wtPath,
 		"tmux set-option -t proj-add-kafka-publisher @workenv_id 1",
-		"tmux send-keys -t proj-add-kafka-publisher claude --name proj-add-kafka-publisher Enter",
+		startLine(env, "proj-add-kafka-publisher", 1, "claude --name proj-add-kafka-publisher"),
 	} {
 		if !hasCall(fake, want) {
 			t.Errorf("missing call %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
@@ -737,7 +748,7 @@ func TestOpenRecreatesMissingWorktreeAndSession(t *testing.T) {
 		"git worktree add " + gone + " feature-123", // branch already exists locally: plain add, no -b
 		"tmux new-session -d -s proj-feature-123 -c " + gone,
 		"tmux set-option -t proj-feature-123 @workenv_id " + strconv.Itoa(res.ID),
-		"tmux send-keys -t proj-feature-123 claude --name proj-feature-123 Enter",
+		startLine(env, "proj-feature-123", res.ID, resumed("claude --name proj-feature-123")),
 	} {
 		if !hasCall(fake, want) {
 			t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
@@ -759,7 +770,7 @@ func TestOpenNamesClaudeSessionAfterTmuxSession(t *testing.T) {
 	if _, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true}); err != nil {
 		t.Fatalf("Open error: %v", err)
 	}
-	want := "tmux send-keys -t proj-feature-123 claude --dangerously-skip-permissions --name proj-feature-123 Enter"
+	want := startLine(env, "proj-feature-123", 1, resumed("claude --dangerously-skip-permissions --name proj-feature-123"))
 	if !slices.Contains(fake.Joined(), want) {
 		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
 	}
@@ -790,9 +801,13 @@ func TestOpenStartsClaudeWithRemoteControl(t *testing.T) {
 			if _, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true, RemoteControl: tc.flag}); err != nil {
 				t.Fatalf("Open error: %v", err)
 			}
-			want := "tmux send-keys -t proj-feature-123 claude --name proj-feature-123 --remote-control proj-feature-123 Enter"
+			want := startLine(env, "proj-feature-123", 1, resumed("claude --name proj-feature-123 --remote-control proj-feature-123"))
 			if !slices.Contains(fake.Joined(), want) {
 				t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+			}
+			// Only --rc is recorded: remote_control applies on its own.
+			if rec := loadState(t, env).ByID(1); rec.RemoteControl != tc.flag {
+				t.Errorf("recorded remote_control = %v, want %v", rec.RemoteControl, tc.flag)
 			}
 		})
 	}
@@ -811,7 +826,7 @@ func TestOpenStartsClaudeWithPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open error: %v", err)
 	}
-	want := `tmux send-keys -t proj-feature-123 claude --name proj-feature-123 'don'\''t stop' Enter`
+	want := startLine(env, "proj-feature-123", 1, `claude --name proj-feature-123 --continue 'don'\''t stop' || claude --name proj-feature-123 'don'\''t stop'`)
 	if !slices.Contains(fake.Joined(), want) {
 		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
 	}
@@ -842,6 +857,9 @@ func TestOpenReportsIgnoredPromptOnLiveSession(t *testing.T) {
 	if hasCall(fake, "tmux send-keys") {
 		t.Errorf("a live session must not be typed into:\n%s", strings.Join(fake.Joined(), "\n"))
 	}
+	if rec := loadState(t, env).ByID(1); rec.Model != "" || rec.Effort != "" {
+		t.Errorf("record = %+v; flags a live session ignored must not be recorded", rec)
+	}
 }
 
 // TestOpenStartsClaudeWithModelAndEffort covers issue #34: --model and
@@ -857,7 +875,7 @@ func TestOpenStartsClaudeWithModelAndEffort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open error: %v", err)
 	}
-	want := "tmux send-keys -t proj-feature-123 claude --name proj-feature-123 --model 'opus[1m]' --effort 'high' Enter"
+	want := startLine(env, "proj-feature-123", 1, resumed("claude --name proj-feature-123 --model 'opus[1m]' --effort 'high'"))
 	if !slices.Contains(fake.Joined(), want) {
 		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
 	}
@@ -907,6 +925,123 @@ func TestClaudeCommand(t *testing.T) {
 		if got := claudeCommand(tc.cmd, tc.session, l); got != tc.want {
 			t.Errorf("claudeCommand(%q, %q, %+v) = %q, want %q", tc.cmd, tc.session, l, got, tc.want)
 		}
+	}
+}
+
+// TestClaudeCommandContinues: a session recreated for an environment that
+// has run before continues its conversation, and falls back to a fresh
+// claude, prompt included, for a worktree with none; a claude_cmd that
+// continues or resumes on its own keeps its choice.
+func TestClaudeCommandContinues(t *testing.T) {
+	for _, tc := range []struct{ cmd, prompt, want string }{
+		{"claude", "", "claude --name s --continue || claude --name s"},
+		{"claude", "go on", "claude --name s --continue 'go on' || claude --name s 'go on'"},
+		{"claude -c", "", "claude -c --name s"},
+		{"claude --continue", "", "claude --continue --name s"},
+		{"claude -r abc", "", "claude -r abc --name s"},
+		{"claude --resume=abc", "go", "claude --resume=abc --name s 'go'"},
+	} {
+		l := launch{Continue: true, Prompt: tc.prompt}
+		if got := claudeCommand(tc.cmd, "s", l); got != tc.want {
+			t.Errorf("claudeCommand(%q, \"s\", %+v) = %q, want %q", tc.cmd, l, got, tc.want)
+		}
+	}
+}
+
+// TestOpenRecordsLaunchFlags covers issue #36: the --rc, --model and
+// --effort a new environment's session starts with are recorded, and a
+// first session starts claude fresh, without --continue.
+func TestOpenRecordsLaunchFlags(t *testing.T) {
+	fake := &execx.Fake{Responses: append([]execx.FakeResponse{
+		{Prefix: "gh issue view 123", Out: `{"number":123,"title":"Add Kafka publisher","closedByPullRequestsReferences":[]}`},
+	}, newBranchResponses...)}
+	env, _ := newTestEnv(t, fake)
+
+	res, err := env.Open(OpenOptions{Target: issue(123), NoTerminal: true, RemoteControl: true, Model: "opus", Effort: "high"})
+	if err != nil {
+		t.Fatalf("Open error: %v", err)
+	}
+	want := startLine(env, res.Session, res.ID, "claude --name proj-add-kafka-publisher --remote-control proj-add-kafka-publisher --model 'opus' --effort 'high'")
+	if !slices.Contains(fake.Joined(), want) {
+		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+	}
+	if rec := loadState(t, env).ByID(res.ID); !rec.RemoteControl || rec.Model != "opus" || rec.Effort != "high" {
+		t.Errorf("record = %+v, want remote_control, model and effort recorded", rec)
+	}
+}
+
+// TestRecreatedSessionKeepsLaunchFlags: after a reboot, attach brings the
+// session back with the recorded flags and the conversation continued, and
+// a flag passed to a later open replaces only its own recorded value.
+func TestRecreatedSessionKeepsLaunchFlags(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession}}
+	env, repo := newTestEnv(t, fake)
+	gone := filepath.Join(env.Cwd, "gone")
+	seed(t, env, &state.Env{
+		Project: "proj", Branch: "feature-123", TmuxSession: "proj-feature-123", WorktreePath: gone, RepoPath: repo,
+		RemoteControl: true, Model: "opus", Effort: "high",
+	})
+
+	if _, err := env.Open(OpenOptions{Target: name("1"), NoTerminal: true, AttachOnly: true}); err != nil {
+		t.Fatalf("attach error: %v", err)
+	}
+	want := startLine(env, "proj-feature-123", 1, resumed("claude --name proj-feature-123 --remote-control proj-feature-123 --model 'opus' --effort 'high'"))
+	if !slices.Contains(fake.Joined(), want) {
+		t.Errorf("attach: missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+	}
+
+	fake.Calls = nil
+	if _, err := env.Open(OpenOptions{Target: name("1"), NoTerminal: true, Model: "sonnet"}); err != nil {
+		t.Fatalf("open error: %v", err)
+	}
+	want = startLine(env, "proj-feature-123", 1, resumed("claude --name proj-feature-123 --remote-control proj-feature-123 --model 'sonnet' --effort 'high'"))
+	if !slices.Contains(fake.Joined(), want) {
+		t.Errorf("open --model: missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+	}
+	if rec := loadState(t, env).ByID(1); !rec.RemoteControl || rec.Model != "sonnet" || rec.Effort != "high" {
+		t.Errorf("record = %+v, want model replaced, remote_control and effort kept", rec)
+	}
+}
+
+// TestListMarksInterrupted: starting claude leaves a running marker that
+// the typed command removes once claude exits. An environment without a
+// session whose marker is still there was interrupted; one whose claude
+// exited, or whose session is live, is not.
+func TestListMarksInterrupted(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession}}
+	env, repo := newTestEnv(t, fake)
+	var envs []*state.Env
+	for _, b := range []string{"a", "b", "c"} {
+		envs = append(envs, &state.Env{Project: "proj", Branch: b, TmuxSession: "proj-" + b, WorktreePath: filepath.Join(env.Cwd, b), RepoPath: repo})
+	}
+	seed(t, env, envs...)
+	for _, id := range []string{"1", "2", "3"} {
+		if _, err := env.Open(OpenOptions{Target: name(id), NoTerminal: true}); err != nil {
+			t.Fatalf("Open %s error: %v", id, err)
+		}
+	}
+	if _, err := os.Stat(env.runningMarker(1)); err != nil {
+		t.Fatalf("starting claude must leave a running marker: %v", err)
+	}
+	// claude exited in b, then the machine rebooted; c's session is back.
+	if err := os.Remove(env.runningMarker(2)); err != nil {
+		t.Fatal(err)
+	}
+	fake.Responses = []execx.FakeResponse{
+		{Prefix: "tmux list-sessions", Out: "proj-c\t3\t" + env.Cwd + "\t0\n"},
+		{Prefix: "tmux list-panes -a", Out: "proj-c\t2.1.296\n"},
+	}
+
+	items, err := env.List()
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	var got []bool
+	for _, it := range items {
+		got = append(got, it.Interrupted)
+	}
+	if want := []bool{true, false, false}; !slices.Equal(got, want) {
+		t.Errorf("Interrupted = %v, want %v", got, want)
 	}
 }
 
@@ -1168,6 +1303,11 @@ func TestDeleteRemovesEverything(t *testing.T) {
 	env, repo := newTestEnv(t, fake)
 	path := mkdir(t, filepath.Join(env.Cwd, "wt"))
 	seed(t, env, &state.Env{Project: "proj", Branch: "feature-123", TmuxSession: "proj-feature-123", WorktreePath: path, RepoPath: repo})
+	marker := env.runningMarker(1)
+	mkdir(t, filepath.Dir(marker))
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	id, session, err := env.Delete(name("proj-feature-123"), "", DeleteOptions{DeleteBranch: true})
 	if err != nil {
@@ -1188,6 +1328,9 @@ func TestDeleteRemovesEverything(t *testing.T) {
 	}
 	if len(loadState(t, env).Envs) != 0 {
 		t.Error("record must be removed")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("running marker must be removed: a deleted session was stopped, not interrupted")
 	}
 }
 
