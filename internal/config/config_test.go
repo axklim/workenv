@@ -180,6 +180,51 @@ func TestParseRejectsBadAliases(t *testing.T) {
 	}
 }
 
+func TestParseNoWorkers(t *testing.T) {
+	raw := `
+[no_workers]
+claudestrophobic = "its sessions are chats: use /chat"
+cs_2 = ""
+[aliases]
+infra = "simple-dimple-infra"
+[no_workers]
+infra = "operator only"
+`
+	cfg, err := parse(raw, "/home/u")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	want := map[string]string{"claudestrophobic": "its sessions are chats: use /chat", "cs_2": "", "infra": "operator only"}
+	if !maps.Equal(cfg.NoWorkers, want) {
+		t.Errorf("NoWorkers = %v, want %v", cfg.NoWorkers, want)
+	}
+	for _, tc := range []struct {
+		repo, key, hint string
+		ok              bool
+	}{
+		{"claudestrophobic", "claudestrophobic", "its sessions are chats: use /chat", true},
+		{"simple-dimple-infra", "infra", "operator only", true},
+		{"trade", "", "", false},
+	} {
+		key, hint, ok := cfg.NoWorkersFor(tc.repo)
+		if key != tc.key || hint != tc.hint || ok != tc.ok {
+			t.Errorf("NoWorkersFor(%q) = (%q, %q, %v), want (%q, %q, %v)", tc.repo, key, hint, ok, tc.key, tc.hint, tc.ok)
+		}
+	}
+}
+
+func TestParseRejectsBadNoWorkers(t *testing.T) {
+	for _, raw := range []string{
+		"[no_workers]\n\"a b\" = \"x\"",
+		"[no_workers]\na/b = \"x\"",
+		"[no_workers]\na = \"x\"\na = \"y\"",
+	} {
+		if _, err := parse(raw, "/home/u"); err == nil {
+			t.Errorf("parse(%q): expected an error, got nil", raw)
+		}
+	}
+}
+
 func TestPathUsesXDGConfigHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
 	if got := Path(); got != "/xdg/workenv/config.toml" {

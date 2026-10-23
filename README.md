@@ -53,11 +53,15 @@ works — the binary then reports its version as `dev`, since nothing stamped it
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
                    [--rc] [--model M] [--effort E] [--prompt TEXT]
                    [--host H] [--no-terminal]
+we new    <repo | issue URL | name> [name] [--session S] [--wt W]
+                   [--rc] [--model M] [--effort E] [--prompt TEXT]
+                   [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
-we delete <target> [--repo R] [--host H]
+we delete [<target>] [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
+we gc     [--dry-run] [--delete-branch] [--host H]
 we version
 ```
 
@@ -90,14 +94,24 @@ a session recreated after a reboot gets them again, and continues its
 conversation with `claude --continue`. `we ls` shows `interrupted` for an
 environment whose session died while claude was still running in it.
 
+`we new` is `open` for a fresh branch: `we new infra review` is branch
+`review` in the repository aliased `infra`, `we new infra` the next free
+`feature-N` there, `we new review` branch `review` in the repository you are
+in, and `we new <issue URL>` the same as `we open` on it. It prints how it
+read its arguments (`repo: …`, `branch: …`) before `open`'s output. With
+`--rc`, `open` and `new` wait for Remote Control and end with
+`rc: <url>`, or `rc: timeout` and a non-zero exit after 2 minutes.
+
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
 for when you're not standing in it: a bare name is an alias or is looked up
 in `projects_path`, a path reaches a repository outside it. Other target kinds
 carry their own repository.
 
-`we delete <target>` kills the tmux session, removes the worktree and drops
-the record. `--force` removes a dirty worktree, `--delete-branch` also deletes
-the branch, `--keep-worktree` stops after killing the session.
+`we delete <target>` removes the worktree, drops the record and kills the tmux
+session, in that order; with no target it deletes the environment you are
+standing in, so a session can remove itself. `--force` removes a dirty
+worktree, `--delete-branch` also deletes the branch, `--keep-worktree` only
+kills the session.
 
 ```
 $ we ls
@@ -140,6 +154,11 @@ worktree_path = "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"
 # infra`, and session infra-<branch> for new environments
 [aliases]
 infra = "simple-dimple-infra"
+
+# repositories (name or alias) where `new`, and an `open` that would create,
+# refuse with this hint
+[no_workers]
+claudestrophobic = "its sessions are chats: use /chat"
 ```
 
 The default places worktrees as siblings of the repository:
@@ -147,16 +166,23 @@ The default places worktrees as siblings of the repository:
 `~/projects/trade.review_claude-file`. A worktree already checked out on the
 branch is adopted rather than duplicated.
 
-## Claude Code skill
+## Claude Code skills
 
-`skills/we/SKILL.md` teaches a Claude Code session to turn "run a session for
-the infra project, name it review" into the right `we open` call — target
-kinds, `--repo`, `--rc`, `--prompt`, `--no-terminal` for a headless caller,
-and what `we ls` does and does not know. It ships with the binary, so the
-skill you have always matches the `we` you have:
+Three skills give any Claude Code session — one `we` opened included — slash
+commands to start and remove work environments of its own:
+
+- `/we <repo | alias | issue URL | .> [name]` runs `we new … --no-terminal
+  --rc` and reports the session and its Remote Control link; it also teaches
+  a session the rest of `we` (targets, flags, reading `we ls`).
+- `/we-remove [target]` runs `we delete --delete-branch`, the current
+  environment when no target is given.
+- `/we-list` runs `we ls`.
+
+Every decision is `we`'s own, so the skills stay thin. They ship with the
+binary, so the skills you have always match the `we` you have; link each one:
 
 ```
-ln -s "$(brew --prefix)/share/workenv/skills/we" ~/.claude/skills/we
+for s in "$(brew --prefix)"/share/workenv/skills/*; do ln -s "$s" ~/.claude/skills/; done
 ```
 
 The repository is also a Claude Code plugin (`.claude-plugin/plugin.json`,

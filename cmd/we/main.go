@@ -15,6 +15,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/jessevdk/go-flags"
 
@@ -31,6 +32,7 @@ import (
 // list and the aliases have no hand-written copy to drift from.
 type options struct {
 	Open    openCmd    `command:"open" description:"find or create a work environment and show it"`
+	New     newCmd     `command:"new" description:"open a work environment on a new branch of a repository, or for an issue"`
 	Attach  attachCmd  `command:"attach" description:"find an existing work environment and show it"`
 	List    listCmd    `command:"list" alias:"ls" description:"list work environments"`
 	Show    showCmd    `command:"show" description:"print one environment in the stacked form"`
@@ -72,10 +74,30 @@ type attachCmd struct {
 type openCmd struct {
 	attachCmd
 	overrides
-	RC     bool   `long:"rc" description:"start claude with Remote Control, named after the session (overrides remote_control)"`
+	sessionFlags
+}
+
+// sessionFlags shape the claude a started session runs; open and new take
+// them.
+type sessionFlags struct {
+	RC     bool   `long:"rc" description:"start claude with Remote Control, named after the session (overrides remote_control), and print its URL"`
 	Prompt string `long:"prompt" value-name:"TEXT" description:"first prompt for claude when the session is started"`
 	Model  string `long:"model" value-name:"NAME" description:"claude --model when the session is started"`
 	Effort string `long:"effort" value-name:"LEVEL" description:"claude --effort when the session is started"`
+}
+
+// newCmd is open's flags minus --repo and --branch, which its arguments
+// say instead.
+type newCmd struct {
+	hostOpt
+	sessionFlags
+	NoTerminal bool   `long:"no-terminal" description:"do not open or switch a terminal"`
+	Session    string `long:"session" value-name:"NAME" description:"tmux session name (creation only)"`
+	Wt         string `long:"wt" value-name:"PATH|NAME" description:"worktree location (creation only)"`
+	Args       struct {
+		What string `positional-arg-name:"repo|issue-url|name" required:"yes" description:"repository (alias, name in projects_path, path or .), issue or PR URL, or a branch name in the cwd's repository"`
+		Name string `positional-arg-name:"name" description:"branch name; feature-N, the next free one, when omitted"`
+	} `positional-args:"yes"`
 }
 
 // overrides are the creation-only flags: they decide what a new environment
@@ -101,7 +123,9 @@ type showCmd struct {
 type deleteCmd struct {
 	hostOpt
 	repoOpt
-	targetArg
+	Args struct {
+		Target string `positional-arg-name:"target" description:"id, session, branch, or issue/PR/repository URL; the environment the cwd is in when omitted"`
+	} `positional-args:"yes"`
 	Force        bool `long:"force" description:"remove the worktree even if it has local changes"`
 	DeleteBranch bool `long:"delete-branch" description:"also delete the branch"`
 	KeepWorktree bool `long:"keep-worktree" description:"kill the session only"`
@@ -139,6 +163,16 @@ to the repository. A bare name that is an alias (see [aliases] below) means
 its repository. Other target kinds carry their own repository, so it is
 ignored there.
 
+we new <repo|issue-url|name> [name] opens a fresh branch from a sentence:
+  we new <issue URL> [name]  as open <issue URL>; a name is its --branch
+  we new <repo> <name>       branch <name> in repo: an alias, a name in
+                             projects_path, a path, or . for the cwd's
+  we new <repo>              branch feature-N, the smallest N free there
+  we new <name>              branch <name> in the cwd's repository
+A lone argument is a repository only when it is one and not the cwd's own.
+new prints the reading it took (repo:, branch:) before open's output, then
+finds or creates like open. we open <alias> stays the project home.
+
 open and attach are one code path; attach never creates, so --branch,
 --session and --wt are rejected there rather than silently ignored. On a
 hit, open prints a note to stderr saying they were ignored.
@@ -149,6 +183,10 @@ running is left alone, and open says on stderr that --prompt was ignored.
 --model <name> and --effort <level> work the same way: passed to claude
 verbatim when open starts the session, reported as ignored otherwise. They
 override the same flag in claude_cmd.
+
+--rc on open and new also waits for Remote Control to come up in the
+session and prints rc: <url> as the last line; after 2 minutes without it,
+rc: timeout, the last screen lines on stderr, and a non-zero exit.
 
 --rc, --model and --effort are recorded with the environment and apply
 again whenever open or attach recreates its session, after a reboot say;
@@ -168,8 +206,14 @@ Examples:
   we attach 7
   we ls -l
   we ls --json
+  we new infra review --no-terminal --rc
   we delete 7 --delete-branch
+  we delete                   (the environment the cwd is in)
   we gc --dry-run
+
+delete without a target deletes the environment the cwd is in. Every
+delete kills the session last, after the worktree and the record are
+gone, so it can run inside the session it deletes.
 
 gc deletes an environment once every PR linked to it is merged or closed
 and its worktree is gone; one without a PR is never deleted. It asks gh
@@ -189,6 +233,8 @@ Config (XDG): ~/.config/workenv/config.toml
   [aliases]                      short repository names, last in the file:
   infra = "simple-dimple-infra"  --repo infra, we open infra, and session
                                  infra-<branch> for new environments
+  [no_workers]                   repositories (name or alias) open and new
+  claudestrophobic = "use /chat" create no environment in, with a hint
 
 State (XDG): ~/.local/state/workenv/envs.json
 `
@@ -255,6 +301,8 @@ func run(args []string) error {
 	switch p.Active.Name {
 	case "open":
 		return runOpen(env, "open", opts.Open, false)
+	case "new":
+		return runNew(env, opts.New)
 	case "attach":
 		return runOpen(env, "attach", openCmd{attachCmd: opts.Attach}, true)
 	case "list":
@@ -306,6 +354,8 @@ func newEnv() (*we.Env, error) {
 		InsideTmux:   os.Getenv("TMUX") != "",
 		StatePath:    state.DefaultPath(),
 		ClaudeConfig: claudeConfig,
+		RCTimeout:    120 * time.Second,
+		RCInterval:   2 * time.Second,
 	}, nil
 }
 
@@ -333,7 +383,7 @@ func runOpen(env *we.Env, cmd string, c openCmd, attachOnly bool) error {
 	}
 
 	if c.Host != "" {
-		return openRemote(env, cmd, raw, c)
+		return openRemote(env, []string{cmd, raw}, c)
 	}
 
 	res, err := env.Open(we.OpenOptions{
@@ -345,7 +395,74 @@ func runOpen(env *we.Env, cmd string, c openCmd, attachOnly bool) error {
 		return err
 	}
 	printOpenResult(res)
+	if c.RC {
+		return printRCURL(env, res.Session)
+	}
 	return nil
+}
+
+// runNew prints how it read its arguments, then opens like open does.
+func runNew(env *we.Env, c newCmd) error {
+	args := []string{c.Args.What}
+	if c.Args.Name != "" {
+		args = append(args, c.Args.Name)
+	}
+	if c.Host != "" {
+		return openRemote(env, append([]string{"new"}, args...), openCmd{
+			attachCmd:    attachCmd{hostOpt: c.hostOpt, NoTerminal: c.NoTerminal},
+			overrides:    overrides{Session: c.Session, Wt: c.Wt},
+			sessionFlags: c.sessionFlags,
+		})
+	}
+	plan, err := env.PlanNew(args)
+	if err != nil {
+		return err
+	}
+	for _, line := range plan.Reading {
+		fmt.Println(line)
+	}
+	res, err := env.New(plan, we.OpenOptions{
+		Session: c.Session, Wt: c.Wt, NoTerminal: c.NoTerminal,
+		RemoteControl: c.RC, Prompt: c.Prompt, Model: c.Model, Effort: c.Effort,
+	})
+	if err != nil {
+		return err
+	}
+	printOpenResult(res)
+	if c.RC {
+		return printRCURL(env, res.Session)
+	}
+	return nil
+}
+
+// printRCURL waits for Remote Control in session and prints `rc: <url>` —
+// or `rc: timeout`, with the last lines of the screen on stderr, and an
+// error.
+func printRCURL(env *we.Env, session string) error {
+	url, screen, err := env.RemoteControlURL(session)
+	if err != nil {
+		fmt.Println("rc: timeout")
+		for _, line := range lastLines(screen, 8) {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		return err
+	}
+	fmt.Println("rc: " + url)
+	return nil
+}
+
+// lastLines is the last n non-blank lines of screen.
+func lastLines(screen string, n int) []string {
+	var lines []string
+	for _, line := range strings.Split(screen, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
 }
 
 // printOpenResult prints the human summary, then the machine-readable
@@ -384,7 +501,8 @@ func printOpenResult(res we.OpenResult) {
 	}
 }
 
-// openRemote runs open/attach on host over ssh — --no-terminal first, then
+// openRemote runs open/attach/new on host over ssh — cmdArgs (the command
+// and its positional arguments), --no-terminal, then
 // whichever of --repo, --branch, --session, --wt, --rc, --model, --effort,
 // --prompt were given, in that order — prints what it printed, and attaches
 // a local terminal to the resulting session unless --no-terminal was
@@ -398,9 +516,10 @@ func printOpenResult(res we.OpenResult) {
 // — has to reach the user directly. Output only surfaces stderr inside the
 // error it returns, so on a successful (non-error) remote call that note
 // would otherwise be silently dropped.
-func openRemote(env *we.Env, cmd, rawTarget string, c openCmd) error {
-	host := c.Host
-	remote := []string{host, env.Cfg.RemoteWe, cmd, rawTarget, "--no-terminal"}
+func openRemote(env *we.Env, cmdArgs []string, c openCmd) error {
+	host, cmd := c.Host, cmdArgs[0]
+	remote := append([]string{host, env.Cfg.RemoteWe}, cmdArgs...)
+	remote = append(remote, "--no-terminal")
 	if c.Repo != "" {
 		remote = append(remote, "--repo", c.Repo)
 	}
@@ -500,7 +619,10 @@ func runShow(env *we.Env, c showCmd) error {
 func runDelete(env *we.Env, c deleteCmd) error {
 	raw := c.Args.Target
 	if c.Host != "" {
-		remote := []string{c.Host, env.Cfg.RemoteWe, "delete", raw}
+		remote := []string{c.Host, env.Cfg.RemoteWe, "delete"}
+		if raw != "" {
+			remote = append(remote, raw)
+		}
 		if c.Repo != "" {
 			remote = append(remote, "--repo", c.Repo)
 		}
@@ -515,9 +637,12 @@ func runDelete(env *we.Env, c deleteCmd) error {
 		}
 		return env.R.Run("", "ssh", remote...)
 	}
-	tgt, err := target.Parse(raw)
-	if err != nil {
-		return err
+	var tgt target.Target
+	if raw != "" {
+		var err error
+		if tgt, err = target.Parse(raw); err != nil {
+			return err
+		}
 	}
 	id, session, err := env.Delete(tgt, c.Repo, we.DeleteOptions{
 		Force:        c.Force,
