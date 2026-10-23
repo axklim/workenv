@@ -130,6 +130,25 @@ func (g Git) BranchExists(repoDir, ref string) bool {
 	return err == nil
 }
 
+// Branches returns the names of the local branches and of the branches
+// origin had at the last fetch, origin/ stripped, so a name taken in either
+// place is in the set once.
+func (g Git) Branches(repoDir string) (map[string]bool, error) {
+	out, err := g.R.Output(repoDir, "git", "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+	if err != nil {
+		return nil, err
+	}
+	names := map[string]bool{}
+	for _, ref := range strings.Fields(out) {
+		if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+			names[name] = true
+		} else if name, ok := strings.CutPrefix(ref, "refs/remotes/origin/"); ok && name != "HEAD" {
+			names[name] = true
+		}
+	}
+	return names, nil
+}
+
 // Base is the start point AddWorktree cut a new branch from; the zero
 // value when it checked out an existing branch instead.
 type Base struct {

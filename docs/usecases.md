@@ -5,7 +5,7 @@ Worked examples, in the order a day tends to go. Paths assume
 [README](../README.md) for both.
 
 - [Starting work](#starting-work) — from an issue, its PR, a fork's PR, a bare
-  repository, or nothing at all
+  repository, or nothing at all; `we new` for a fresh branch
 - [Coming back](#coming-back) — finding an environment again, and renaming its
   branch
 - [When something breaks](#when-something-breaks) — a reboot, interrupted
@@ -108,6 +108,50 @@ Branch `spike-latency` off the default branch, worktree
 and `open` prints the start point (`base: origin/main 1a2b3c4`). Offline, it
 warns and branches from the last fetch instead.
 
+### A fresh branch from a sentence
+
+```
+we new infra review        # branch review in simple-dimple-infra (alias infra)
+we new infra               # branch feature-2 there: feature-1 is taken
+cd ~/projects/trade && we new spike-latency   # branch spike-latency in trade
+we new . && we new . bugfix                   # the cwd's repository, explicitly
+we new https://github.com/axklim/trade/issues/59
+```
+
+`new` is `open` for a caller that has a repository and maybe a name. It
+first prints how it read them, then the usual `open` output:
+
+```
+repo: simple-dimple-infra (alias infra)
+branch: feature-2 (next free)
+created environment 12
+...
+```
+
+With no name the branch is `feature-N`, the smallest N no branch (local or on
+origin) and no environment has. One argument is a repository when it is an
+alias, a directory in `projects_path` or a path, and not the repository you
+are standing in; otherwise it is a branch name there, so `we new trade` from
+inside `trade` makes branch `trade`. `we open infra` still means the project
+home on `main`. Running the same `we new infra review` again finds the
+environment instead of making another.
+
+### A repository that takes no work environments
+
+```toml
+[no_workers]
+claudestrophobic = "its sessions are chats: use /chat"
+```
+
+```
+$ we new claudestrophobic
+we: claudestrophobic takes no work environments: its sessions are chats: use /chat
+```
+
+`new` refuses such a repository, and `open` refuses whenever it would create
+an environment there. An environment that already exists in it still opens,
+attaches and deletes.
+
 ## Coming back
 
 ### Come back to something
@@ -201,10 +245,22 @@ a permanent change, set `worktree_path` in the config instead.
 we delete 7 --delete-branch
 ```
 
-Kills the session, removes the worktree, deletes the branch, drops the record.
+Removes the worktree, deletes the branch, drops the record, and kills the
+session last.
 A branch that is already gone — the PR was merged with "delete branch" — is
 fine; only a branch that exists and cannot be deleted stops it. `--force` if
 the worktree is dirty, `--keep-worktree` to stop after killing the session.
+
+#### Remove the environment you are in
+
+```
+cd ~/projects/trade.review-claude-md-file && we delete --delete-branch
+```
+
+No target means the environment whose worktree holds the cwd, the one `ls`
+marks with `*`. Since the session is killed only after everything else is
+gone, an agent can run this from inside the session it removes: the session
+ends with the command, and nothing is left half done.
 
 ### Clear out merged work
 
@@ -251,6 +307,20 @@ started by another agent on this machine can be picked up that way. Set
 when the session is started, so a live one is left as it is. The environment
 remembers `--rc`, so its session comes back with Remote Control after a
 reboot.
+
+With `--rc`, `open` (and `new`) wait for Remote Control to come up and end
+with its link:
+
+```
+WE_SESSION=trade-review-claude-md-file
+rc: https://claude.ai/code/session_01AbC…
+```
+
+That link is what to hand the person on the other device. If it does not
+come within 2 minutes — the trust dialog of a fresh clone without
+`trust_clones`, say — the last line is `rc: timeout`, the last screen lines go
+to stderr, and the exit is non-zero. A session that is already running answers
+at once if it runs Remote Control, and times out if it does not.
 
 ## Skipping claude's trust dialog in a fresh clone
 

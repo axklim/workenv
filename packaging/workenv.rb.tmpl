@@ -54,12 +54,15 @@ class Workenv < Formula
       Neither is needed for `we open --no-terminal`, nor on a remote host
       reached with `we --host`.
 
-      The Claude Code skill that teaches a session to drive `we` ships here:
+      The Claude Code skills that drive `we` (/we, /we-remove, /we-list)
+      ship here:
 
-        #{pkgshare}/skills/we
+        #{pkgshare}/skills
 
-      Link it into ~/.claude/skills/we (or let your dotfiles do it) so the
-      skill always matches the installed version.
+      Link every one into ~/.claude/skills/ (or let your dotfiles do it) so
+      the skills always match the installed version:
+
+        for s in #{pkgshare}/skills/*; do ln -s "$s" ~/.claude/skills/; done
     EOS
   end
 
@@ -70,6 +73,8 @@ class Workenv < Formula
 
     # `we` with no arguments exits non-zero, so the usage check uses `help`.
     assert_match "we open", shell_output("#{bin}/we help")
-    assert_path_exists pkgshare/"skills/we/SKILL.md"
+    %w[we we-remove we-list].each do |skill|
+      assert_path_exists pkgshare/"skills/#{skill}/SKILL.md"
+    end
   end
 end

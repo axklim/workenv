@@ -338,10 +338,13 @@ worktree gets its own environment. A worktree can only be on one branch.
 we open   <target> [--repo R] [--branch B] [--session S] [--wt W]
                    [--rc] [--model M] [--effort E] [--prompt TEXT]
                    [--host H] [--no-terminal]
+we new    <repo | issue URL | name> [name] [--session S] [--wt W]
+                   [--rc] [--model M] [--effort E] [--prompt TEXT]
+                   [--host H] [--no-terminal]
 we attach <target> [--repo R] [--host H] [--no-terminal]
 we ls     [-l] [--json] [--host H]
 we show   <target> [--host H]
-we delete <target> [--repo R] [--host H]
+we delete [<target>] [--repo R] [--host H]
                    [--force] [--delete-branch] [--keep-worktree]
 we gc     [--dry-run] [--delete-branch] [--host H]
 ```
@@ -362,6 +365,51 @@ rejected there rather than silently ignored.
 `--branch`, `--session` and `--wt` only apply when an environment is
 created. On a hit, `open` prints a one-line note to stderr saying they were
 ignored, so re-running a command from shell history still attaches.
+
+**new** is `open` from a sentence, for a caller that has a repository and
+maybe a name rather than a target ([issue
+#42](https://github.com/axklim/workenv/issues/42)):
+
+```
+we new <issue URL> [name]   as `we open <issue URL>`; a name is its --branch
+we new <repo> <name>        branch <name> in repo
+we new <repo>               branch feature-N in repo
+we new <name>               branch <name> in the cwd's repository
+we new . [name]             the cwd's repository, explicitly
+```
+
+A repository is an alias, a directory under `projects_path`, a path (as for
+`--repo`), `.` for the cwd's, or a repository URL found where `open` would
+find it — never cloned here: `new` says to `we open` it instead. With two
+arguments the first is always the repository. One argument that is not a URL
+is a repository when it is one *and* not the cwd's own repository; otherwise
+it is a branch name in the cwd's repository, and outside any repository that
+is an error. So `we new trade` from inside `trade` is branch `trade`, and a
+branch such as `feat/login` stays a branch unless it is a path to a
+repository. A PR URL works like an issue URL. With no name the branch is
+`feature-N`, the smallest N ≥ 1 for which that repository has neither a
+branch `feature-N` (local or `origin/`, read with `git for-each-ref`) nor an
+environment on it.
+
+Before the usual `open` output, `new` prints the reading it took, one line
+each: `target: <owner>/<repo>#<n>` for a URL, else `repo: <name> (<how>)`
+with *how* one of `cwd`, `alias <a>`, `projects_path`, `path`; then
+`branch: <name> (given)` or `branch: feature-N (next free)`. Then it is
+`open`: same session flags and creation overrides (`--branch` and `--repo`
+are its arguments), same find-or-create, same output including
+`WE_SESSION=`. The branch is looked up, adopted or created in that
+repository exactly as `open <branch> --repo <repo>` would, except that it is
+never read as an id or a session name. `we open <alias>` keeps meaning the
+project home; `new` is where a bare repository means a fresh branch.
+
+**No workers.** The config's `[no_workers]` table (see *Configuration*)
+lists repositories, by name or alias, that take no work environments. `new`
+refuses any of them; `open` refuses only when it would *create* an
+environment there — adoption included — so existing environments there can
+still be opened, attached and deleted. The refusal is `we: <key> takes no
+work environments: <hint>`, non-zero exit, before anything is created. The
+repository's name is the project name before aliasing (see *Naming*), so
+every clone of a listed repository is covered.
 
 **Repair on open** (and attach) — each step finds before it creates:
 
@@ -404,9 +452,20 @@ commit) after `branch:`, so a stale base is visible.
 **Remote Control** is off unless `remote_control = true` in the config or
 `we open --rc` turns it on for one open. Either only matters when repair
 starts the session: a session that is already live keeps the claude it
-runs, and `--rc` says nothing then. A session started with `--rc` records
-it, so recreating that session keeps Remote Control on. `attach` does not
-define `--rc`, like the creation overrides.
+runs. A session started with `--rc` records it, so recreating that session
+keeps Remote Control on. `attach` does not define `--rc`, like the creation
+overrides.
+
+With `--rc`, `open` and `new` then wait for Remote Control to come up and
+print `rc: <url>` as the last line of stdout — what a caller handing the
+session to a human reports. They poll the first pane every 2 seconds with
+`tmux capture-pane -p -J -S -` (history included, so a live session that is
+already up answers at once) for Claude Code's `/remote-control is active`
+line and the `https://claude.ai/code/session_…` link on it or the line after.
+After 2 minutes without one they print `rc: timeout`, the last 8 non-blank
+screen lines on stderr, and exit non-zero. This also applies to a live
+session: one that was not started with Remote Control times out. Nothing
+answers dialogs on the way; with `trust_clones = true` none stands in it.
 
 **Initial prompt.** `we open --prompt "<text>"` hands claude its first
 prompt, so a session started for another agent starts working at once. Like
@@ -449,15 +508,24 @@ the record.
 is not in the registry but names a live `@workenv`-tagged session gets that
 session killed.
 
+With no target, `delete` means the environment whose worktree contains the
+cwd — the one `ls` marks — the innermost when worktrees nest; outside every
+environment it is an error. The session is killed **last**, after the
+worktree, the branch and the record are gone, and only then: `delete` may run
+inside that very session (an agent removing itself) and dies with it. A
+failed teardown therefore leaves the session running, and a kill that fails
+after the record is gone leaves a tagged stray that `delete <session>` still
+kills.
+
 **gc** retires finished work. An environment is **finished** when it has at
 least one PR, every one of them is merged or closed, and its worktree is
 missing. A missing worktree alone stays recoverable — the next `open`
 re-adds it — and an environment without a PR, such as a project home on
 `main`, is never finished. gc asks `gh pr view <n> -R <owner>/<repo> --json
 state` once per PR of each environment whose worktree is missing, then
-deletes every finished one exactly like `delete` (a tagged live session is
-killed, the stale worktree pruned, the branch deleted with
-`--delete-branch`). `--dry-run` prints what would go and changes nothing.
+deletes every finished one exactly like `delete` (the stale worktree pruned,
+the branch deleted with `--delete-branch`, the records saved, and only then
+each tagged live session killed). `--dry-run` prints what would go and changes nothing.
 GitHub is asked about every candidate before anything is torn down, so when
 `gh` is missing, offline or unauthenticated, gc fails naming the
 environment and deletes nothing.
@@ -523,7 +591,10 @@ parses the `WE_SESSION=` marker, and opens a local Ghostty running `ssh -t
 devbox tmux attach-session -t <session>`. `remote_control` and
 `trust_clones` are read from the remote host's config, since that is the
 `we` starting claude and cloning.
-`ls` (with `-l` and `--json`), `show`, `delete` and `gc` pass through unchanged. The remote host needs `we`
+`new` passes through like `open`, its arguments verbatim, so the reading is
+the remote host's. `ls` (with `-l` and `--json`), `show`, `delete` (with or
+without a target — without one, the remote cwd is rarely in an environment)
+and `gc` pass through unchanged. The remote host needs `we`
 installed; its path is `remote_we`.
 
 ## Configuration
@@ -546,13 +617,18 @@ worktree_path = "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"
 
 [aliases]                      # short names for repositories; see Aliases
 infra = "simple-dimple-infra"
+
+[no_workers]                   # repositories that take no environments;
+claudestrophobic = "its sessions are chats: use /chat"   # see new
 ```
 
 The parser is line-based, not a TOML library: `key = "value"` lines, `#`
-comment lines, and the `[aliases]` table header. As in TOML, a table runs to
-the next header, so top-level keys come before it. Alias names keep to
-TOML's bare-key characters `[A-Za-z0-9_-]`; quoted keys, inline tables and
-other tables are rejected.
+comment lines, and the `[aliases]` and `[no_workers]` table headers. As in
+TOML, a table runs to the next header, so top-level keys come before it.
+Alias and `no_workers` keys keep to TOML's bare-key characters
+`[A-Za-z0-9_-]`; quoted keys, inline tables and other tables are rejected.
+A `no_workers` key is a repository name or an alias, its value the hint the
+refusal ends with (may be empty).
 
 ## Testing
 
@@ -580,16 +656,28 @@ runner, asserting exact argv and the persisted registry:
   `--dry-run`, failing without `gh` before touching anything, and `ls` marking `done`
   and staying usable without `gh`; a clone trusted in claude's config before
   its session starts, only with `trust_clones`, only for a clone, and a
-  config that cannot be parsed reported rather than failing `open`.
+  config that cannot be parsed reported rather than failing `open`; `new`'s
+  reading of every argument form, `feature-N` skipping local, origin and
+  registry branches, a name never read as an id, and its errors; the
+  `no_workers` refusal by name and alias, for `new` and a creating `open`,
+  and an existing environment there still opening; `delete` of the current
+  (innermost) environment and its error outside one; the session killed
+  after the record is saved, by `delete` and `gc`; the Remote Control link
+  read from the pane, and the timeout returning the last screen.
 - **claudecfg** — the config path, adding the trust key to a missing, empty
   or populated file with every other value kept, leaving an existing answer
   alone, refusing a malformed file without rewriting it, and a symlinked file.
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails
-  to parse or render; the `[aliases]` table and its rejected forms.
-- **tmuxx** — the first pane's command per session.
+  to parse or render; the `[aliases]` and `[no_workers]` tables and their
+  rejected forms.
+- **gitx** — local and origin branch names in one set.
+- **tmuxx** — the first pane's command per session; capturing a pane's
+  history by bare name.
 - **cmd** — listing layout, TTY vs piped rendering, `show`, the `--json`
-  keys and the empty array, the `done` and `interrupted` states, `gc` output and `--host`.
+  keys and the empty array, the `done` and `interrupted` states, `gc` output and `--host`;
+  `new`'s flags and reading printed first, `rc:` as the last line or
+  `rc: timeout` with an error, `new` and target-less `delete` over `--host`.
 
 ## Use cases
 
