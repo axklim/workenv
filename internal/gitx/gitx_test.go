@@ -154,6 +154,22 @@ func TestEnsureOriginBranchFetchesOnlyWhenMissing(t *testing.T) {
 	}
 }
 
+func TestDeleteBranchTreatsAMissingBranchAsDeleted(t *testing.T) {
+	gone := &execx.Fake{Responses: []execx.FakeResponse{{Prefix: "git show-ref", Err: errFake}}}
+	if err := (Git{R: gone}).DeleteBranch("/repo", "module1"); err != nil {
+		t.Fatalf("DeleteBranch error: %v", err)
+	}
+	want := []string{"git show-ref --verify --quiet refs/heads/module1"}
+	if got := gone.Joined(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls = %q, want only %q", got, want)
+	}
+
+	stuck := &execx.Fake{Responses: []execx.FakeResponse{{Prefix: "git branch -D", Err: errFake}}}
+	if err := (Git{R: stuck}).DeleteBranch("/repo", "module1"); !errors.Is(err, errFake) {
+		t.Fatalf("DeleteBranch error = %v, want the git branch -D failure", err)
+	}
+}
+
 func TestCurrentBranch(t *testing.T) {
 	f := &execx.Fake{Responses: []execx.FakeResponse{{Prefix: "git symbolic-ref --short -q HEAD", Out: "feature-x"}}}
 	if got := (Git{R: f}).CurrentBranch("/wt"); got != "feature-x" {
