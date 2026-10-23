@@ -18,6 +18,7 @@ import (
 
 	"github.com/jessevdk/go-flags"
 
+	"workenv/internal/claudecfg"
 	"workenv/internal/config"
 	"workenv/internal/execx"
 	"workenv/internal/state"
@@ -182,6 +183,8 @@ Config (XDG): ~/.config/workenv/config.toml
                                  with --name <session> appended
   remote_control = false         also append --remote-control <session>;
                                  --rc does it for one open
+  trust_clones  = false          mark a repository open clones as trusted,
+                                 so claude skips its trust dialog there
   remote_we     = "we"           we binary path on remote hosts
   [aliases]                      short repository names, last in the file:
   infra = "simple-dimple-infra"  --repo infra, we open infra, and session
@@ -291,13 +294,18 @@ func newEnv() (*we.Env, error) {
 	if err != nil {
 		return nil, err
 	}
+	claudeConfig, err := claudecfg.Path()
+	if err != nil {
+		return nil, err
+	}
 	return &we.Env{
-		Cfg:        cfg,
-		R:          execx.Real{},
-		GOOS:       runtime.GOOS,
-		Cwd:        cwd,
-		InsideTmux: os.Getenv("TMUX") != "",
-		StatePath:  state.DefaultPath(),
+		Cfg:          cfg,
+		R:            execx.Real{},
+		GOOS:         runtime.GOOS,
+		Cwd:          cwd,
+		InsideTmux:   os.Getenv("TMUX") != "",
+		StatePath:    state.DefaultPath(),
+		ClaudeConfig: claudeConfig,
 	}, nil
 }
 
@@ -341,9 +349,10 @@ func runOpen(env *we.Env, cmd string, c openCmd, attachOnly bool) error {
 }
 
 // printOpenResult prints the human summary, then the machine-readable
-// WE_SESSION= line the remote flow parses; a failed fetch of the base,
-// ignored creation overrides and ignored session flags (--model, --effort,
-// --prompt) go to stderr, one line each, after everything else.
+// WE_SESSION= line the remote flow parses; a failed fetch of the base, a
+// clone that could not be marked trusted, ignored creation overrides and
+// ignored session flags (--model, --effort, --prompt) go to stderr, one
+// line each, after everything else.
 func printOpenResult(res we.OpenResult) {
 	verb := "found"
 	if res.Created {
@@ -361,6 +370,9 @@ func printOpenResult(res we.OpenResult) {
 	if res.Base.FetchErr != nil {
 		reason, _, _ := strings.Cut(res.Base.FetchErr.Error(), "\n")
 		fmt.Fprintf(os.Stderr, "we: could not fetch %s, branched from the local copy: %s\n", res.Base.Ref, reason)
+	}
+	if res.TrustErr != nil {
+		fmt.Fprintf(os.Stderr, "we: could not mark %s trusted for claude: %v\n", res.RepoPath, res.TrustErr)
 	}
 	if len(res.IgnoredOverrides) > 0 {
 		fmt.Fprintf(os.Stderr, "we: environment %d already exists; %s ignored\n",

@@ -30,6 +30,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.RemoteControl {
 		t.Error("RemoteControl = true, want false by default")
 	}
+	if cfg.TrustClones {
+		t.Error("TrustClones = true, want false by default")
+	}
 }
 
 func TestParseOverrides(t *testing.T) {
@@ -41,6 +44,7 @@ worktree_path = "~/worktrees/{{ .project }}/{{ .branch | sanitize }}"
 claude_cmd = "claude --dangerously-skip-permissions"
 remote_we = "/usr/local/bin/we"
 remote_control = true
+trust_clones = true
 `
 	cfg, err := parse(raw, home)
 	if err != nil {
@@ -61,6 +65,9 @@ remote_control = true
 	if !cfg.RemoteControl {
 		t.Error("RemoteControl = false, want true")
 	}
+	if !cfg.TrustClones {
+		t.Error("TrustClones = false, want true")
+	}
 }
 
 // TestParseRemoteControlIsBoolean pins the value syntax: TOML booleans are
@@ -75,7 +82,7 @@ func TestParseRemoteControlIsBoolean(t *testing.T) {
 			t.Errorf("parse(%q): RemoteControl = true, want false", raw)
 		}
 	}
-	for _, raw := range []string{`remote_control = yes`, `remote_control = 1`, `remote_control = ""`} {
+	for _, raw := range []string{`remote_control = yes`, `remote_control = 1`, `remote_control = ""`, `trust_clones = yes`} {
 		if _, err := parse(raw, "/home/u"); err == nil {
 			t.Errorf("parse(%q): expected error for a non-boolean value, got nil", raw)
 		}

@@ -227,6 +227,28 @@ with `gh repo clone <owner>/<repo> <projects_path>/<repo>`. A normal clone
 already has the standard fetch refspec and `origin/HEAD`, so no refs setup is
 needed, and its main working tree is the default branch's worktree.
 
+**Trusting a clone.** claude starts in a directory it has not seen on its
+"Is this a project you trust?" dialog and waits there — with `--rc`, Remote
+Control is not up until it is answered, and `--prompt` waits too. A trusted
+parent directory does not answer it for a new repository under it. With
+`trust_clones = true`, `open` answers it for the repository it just cloned,
+right after the clone and so before any session starts: it sets
+`projects["<repository path>"].hasTrustDialogAccepted = true` in claude's
+global config (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`),
+the path symlink-resolved, since that is how claude sees its working
+directory. claude keys a git worktree by its repository, so every worktree
+of the clone is covered by the same entry and adding one writes nothing.
+
+claude rewrites that file whole, so `we` reads it, adds the one key, and
+renames a temp file over it, keeping the file's permissions (and a symlinked
+file's link); every other value is carried over unchanged. A missing or
+empty file starts from `{}`. A key already present is left as it is, `false`
+included — that is an answer too. Only a clone is trusted: a repository
+already on disk was the user's to answer for. The setting is off by default
+because it answers a safety prompt on the user's behalf. A file that cannot
+be read or parsed is not overwritten and does not fail `open`: it prints a
+one-line note on stderr and the session starts on the dialog.
+
 `we` still works in a repository laid out as a bare container
 (`<project>/.git` bare, worktrees inside it): existing worktrees are adopted,
 and `repo_path` resolves correctly through `git rev-parse --git-common-dir`.
@@ -498,8 +520,9 @@ creation overrides, `--rc`, `--model`, `--effort` and `--prompt` passed
 through — model, effort and prompt shell-quoted, since ssh joins its
 arguments into one remote command line —
 parses the `WE_SESSION=` marker, and opens a local Ghostty running `ssh -t
-devbox tmux attach-session -t <session>`. `remote_control` is read from the remote host's config, since
-that is the `we` starting claude.
+devbox tmux attach-session -t <session>`. `remote_control` and
+`trust_clones` are read from the remote host's config, since that is the
+`we` starting claude and cloning.
 `ls` (with `-l` and `--json`), `show`, `delete` and `gc` pass through unchanged. The remote host needs `we`
 installed; its path is `remote_we`.
 
@@ -514,6 +537,8 @@ claude_cmd    = "claude"       # command run in the first tmux window,
                                # with --name <session> appended
 remote_control = false         # also append --remote-control <session>;
                                # `we open --rc` does it for one open
+trust_clones  = false          # pre-accept claude's trust dialog for a
+                               # repository open clones; see Placement
 remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go; see Placement for variables and filters
@@ -553,7 +578,12 @@ runner, asserting exact argv and the persisted registry:
   names and the worktree path alone; show and delete by repository URL
   without GitHub or a clone; gc collecting only finished environments,
   `--dry-run`, failing without `gh` before touching anything, and `ls` marking `done`
-  and staying usable without `gh`.
+  and staying usable without `gh`; a clone trusted in claude's config before
+  its session starts, only with `trust_clones`, only for a clone, and a
+  config that cannot be parsed reported rather than failing `open`.
+- **claudecfg** — the config path, adding the trust key to a missing, empty
+  or populated file with every other value kept, leaving an existing answer
+  alone, refusing a malformed file without rewriting it, and a symlinked file.
 - **config** — template rendering: variables, the `sanitize` filter, `~`
   expansion, relative results, and a clear error for a template that fails
   to parse or render; the `[aliases]` table and its rejected forms.

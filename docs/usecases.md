@@ -252,6 +252,21 @@ when the session is started, so a live one is left as it is. The environment
 remembers `--rc`, so its session comes back with Remote Control after a
 reboot.
 
+## Skipping claude's trust dialog in a fresh clone
+
+```toml
+trust_clones = true
+```
+
+A repository `open` has just cloned is new to `claude`, which would start on
+its "Is this a project you trust?" dialog and wait — no Remote Control and
+no `--prompt` until someone answers it. With `trust_clones = true`, `open`
+records the answer in `~/.claude.json` for the clone before the session
+starts, and every later worktree of that repository shares it. Only a clone
+`open` made itself is trusted; an answer already in the file, yes or no, is
+kept. It is off by default, since it answers a safety prompt for you. If
+`~/.claude.json` cannot be read, `open` says so on stderr and carries on.
+
 ## Handing work to a new session
 
 ```

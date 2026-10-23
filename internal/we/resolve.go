@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"workenv/internal/claudecfg"
 	"workenv/internal/gh"
 	"workenv/internal/gitx"
 	"workenv/internal/naming"
@@ -373,7 +374,21 @@ func (e *Env) repoForTarget(t target.Target, attachOnly bool) (string, error) {
 	if err := e.git().Clone(t.Owner+"/"+t.Repo, dest); err != nil {
 		return "", err
 	}
+	if e.Cfg.TrustClones {
+		e.trustErr = e.trust(dest)
+	}
 	return dest, nil
+}
+
+// trust pre-accepts claude's trust dialog for a fresh clone, before any
+// session starts in it. claude keys the answer by the real path of the
+// repository, and its worktrees share the repository's answer.
+func (e *Env) trust(dir string) error {
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	_, err := claudecfg.Trust(e.ClaudeConfig, dir)
+	return err
 }
 
 // repoFromFlag resolves --repo (or, when empty, the cwd) to a repository

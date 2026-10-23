@@ -27,6 +27,9 @@ type Config struct {
 	RemoteWe string
 	// RemoteControl also starts claude with --remote-control <session>.
 	RemoteControl bool
+	// TrustClones pre-accepts claude's trust dialog for a repository open
+	// clones.
+	TrustClones bool
 	// Aliases maps a short name to a repository name in ProjectsPath; the
 	// alias is the project name of every environment created in it.
 	Aliases map[string]string
@@ -114,14 +117,15 @@ func parse(raw, home string) (Config, error) {
 			cfg.ClaudeCmd = val
 		case "remote_we":
 			cfg.RemoteWe = val
-		case "remote_control":
-			switch val {
-			case "true":
-				cfg.RemoteControl = true
-			case "false":
-				cfg.RemoteControl = false
-			default:
-				return Config{}, fmt.Errorf("config line %d: %s must be true or false, got %q", i+1, key, val)
+		case "remote_control", "trust_clones":
+			b, err := parseBool(val)
+			if err != nil {
+				return Config{}, fmt.Errorf("config line %d: %s %w", i+1, key, err)
+			}
+			if key == "remote_control" {
+				cfg.RemoteControl = b
+			} else {
+				cfg.TrustClones = b
 			}
 		case "projects_dir", "worktrees_dir":
 			return Config{}, fmt.Errorf("config line %d: key %q is retired (use %q instead)", i+1, key, retiredKeyMap[key])
@@ -163,6 +167,16 @@ func (c *Config) addAlias(alias, repo string) error {
 	}
 	c.Aliases[alias] = repo
 	return nil
+}
+
+func parseBool(val string) (bool, error) {
+	switch val {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("must be true or false, got %q", val)
 }
 
 var retiredKeyMap = map[string]string{

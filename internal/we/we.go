@@ -50,6 +50,13 @@ type Env struct {
 	InsideTmux bool
 	// StatePath is the JSON registry of work environments.
 	StatePath string
+	// ClaudeConfig is claude's global config file (claudecfg.Path), where
+	// a repository open clones is marked trusted when Cfg.TrustClones.
+	ClaudeConfig string
+
+	// trustErr is why the repository this Open cloned could not be marked
+	// trusted; it is reported back, not fatal (OpenResult.TrustErr).
+	trustErr error
 }
 
 // OpenOptions describes a target to find or create a work environment for.
@@ -90,6 +97,9 @@ type OpenResult struct {
 	// Base is where a branch created by this open started; zero when no
 	// branch was created.
 	Base gitx.Base
+	// TrustErr is why the repository this open cloned could not be marked
+	// trusted for claude: the session starts on claude's trust dialog.
+	TrustErr error
 }
 
 type DeleteOptions struct {
@@ -133,6 +143,7 @@ func (e *Env) github() gh.Client { return gh.Client{R: e.R} }
 // opts.AttachOnly — repairs its worktree and tmux session, saves the
 // registry and surfaces the session in a terminal.
 func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
+	e.trustErr = nil
 	st, err := state.Load(e.StatePath)
 	if err != nil {
 		return OpenResult{}, err
@@ -175,6 +186,7 @@ func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
 		ID: env.ID, Project: env.Project, Branch: env.Branch, Session: env.TmuxSession,
 		WorktreePath: env.WorktreePath, RepoPath: env.RepoPath, Created: created,
 		IgnoredOverrides: ignored, SessionFlagsIgnored: sessionIgnored, Base: base,
+		TrustErr: e.trustErr,
 	}, nil
 }
 

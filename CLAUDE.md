@@ -91,7 +91,8 @@ Supporting packages: `state` (the JSON registry — pure data plus one file, no
 git or exec), `gitx`, `gh`, `tmuxx` (thin command wrappers), `target` (parses
 what the user typed, renders canonical reference URLs), `naming` (slugs,
 sanitizing, session names), `wtpath` (renders the `worktree_path` template),
-`config`, `execx`.
+`config`, `execx`, `claudecfg` (adds the trust-dialog answer to claude's
+`~/.claude.json`, atomically).
 
 ## Conventions
 
