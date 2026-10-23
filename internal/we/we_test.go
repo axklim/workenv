@@ -1,6 +1,7 @@
 package we
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1392,6 +1393,50 @@ func TestDeleteOnMainWorkingTreeKeepsWorktreeAndBranch(t *testing.T) {
 	}
 }
 
+// TestDeleteBranchAlreadyGone is the end of a worker whose PR was merged
+// with branch deletion: the branch no longer exists, so --delete-branch has
+// nothing left to do and delete still drops the record.
+func TestDeleteBranchAlreadyGone(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		noLiveSession,
+		{Prefix: "git show-ref --verify --quiet refs/heads/module1", Err: errFake},
+	}}
+	env, repo := newTestEnv(t, fake)
+	seed(t, env, &state.Env{Project: "proj", Branch: "module1", TmuxSession: "proj-module1", WorktreePath: filepath.Join(env.Cwd, "gone"), RepoPath: repo})
+
+	if _, _, err := env.Delete(name("proj-module1"), "", DeleteOptions{DeleteBranch: true}); err != nil {
+		t.Fatalf("Delete error: %v", err)
+	}
+	if !hasCall(fake, "git worktree prune") {
+		t.Error("the stale worktree must still be pruned")
+	}
+	if hasCall(fake, "git branch -D") {
+		t.Errorf("a branch that is gone must not be deleted again:\n%s", strings.Join(fake.Joined(), "\n"))
+	}
+	if len(loadState(t, env).Envs) != 0 {
+		t.Error("record must be removed")
+	}
+}
+
+// TestDeleteBranchThatCannotBeDeletedKeepsRecord: a branch that exists and
+// cannot be deleted still fails delete, and the record stays so the
+// environment is not lost.
+func TestDeleteBranchThatCannotBeDeletedKeepsRecord(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		noLiveSession,
+		{Prefix: "git branch -D module1", Err: errFake},
+	}}
+	env, repo := newTestEnv(t, fake)
+	seed(t, env, &state.Env{Project: "proj", Branch: "module1", TmuxSession: "proj-module1", WorktreePath: filepath.Join(env.Cwd, "gone"), RepoPath: repo})
+
+	if _, _, err := env.Delete(name("proj-module1"), "", DeleteOptions{DeleteBranch: true}); !errors.Is(err, errFake) {
+		t.Fatalf("Delete error = %v, want the git branch -D failure", err)
+	}
+	if len(loadState(t, env).Envs) != 1 {
+		t.Error("record must stay when the branch cannot be deleted")
+	}
+}
+
 func TestDeleteByURLAndByID(t *testing.T) {
 	fake := &execx.Fake{Responses: []execx.FakeResponse{
 		{Prefix: "tmux show-options -t proj-x @workenv", Out: "@workenv 1"},
@@ -1763,6 +1808,31 @@ func TestGCDeletesOnlyFinishedEnvironments(t *testing.T) {
 			strings.HasPrefix(c, "git branch -D") && c != "git branch -D merged" {
 			t.Errorf("unexpected teardown call %q", c)
 		}
+	}
+}
+
+// TestGCBranchAlreadyGone: a PR merged with branch deletion leaves no
+// branch behind, which must not stop gc --delete-branch from retiring the
+// environment.
+func TestGCBranchAlreadyGone(t *testing.T) {
+	fake := &execx.Fake{Responses: append([]execx.FakeResponse{
+		{Prefix: "git show-ref --verify --quiet refs/heads/merged", Err: errFake},
+	}, gcStates...)}
+	env, repo := newTestEnv(t, fake)
+	seedGC(t, env, repo)
+
+	retired, err := env.GC(GCOptions{DeleteBranch: true})
+	if err != nil {
+		t.Fatalf("GC error: %v", err)
+	}
+	if len(retired) != 1 || retired[0].ID != 1 {
+		t.Errorf("retired = %+v, want only environment 1", retired)
+	}
+	if hasCall(fake, "git branch -D") {
+		t.Errorf("a branch that is gone must not be deleted again:\n%s", strings.Join(fake.Joined(), "\n"))
+	}
+	if got := ids(loadState(t, env).Envs); !slices.Equal(got, []int{2, 3, 4, 5}) {
+		t.Errorf("remaining ids = %v, want [2 3 4 5]", got)
 	}
 }
 

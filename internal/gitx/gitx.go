@@ -219,7 +219,13 @@ func (g Git) RemoveWorktree(repoDir, path string, force bool) error {
 	return g.Prune(repoDir)
 }
 
+// DeleteBranch force-deletes a local branch. A branch that does not exist
+// is already deleted — the usual end of a PR merged with branch deletion —
+// so only one that exists and cannot be deleted is an error.
 func (g Git) DeleteBranch(repoDir, branch string) error {
+	if !g.BranchExists(repoDir, "refs/heads/"+branch) {
+		return nil
+	}
 	return g.R.Run(repoDir, "git", "branch", "-D", branch)
 }
 

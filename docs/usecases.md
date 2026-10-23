@@ -202,8 +202,9 @@ we delete 7 --delete-branch
 ```
 
 Kills the session, removes the worktree, deletes the branch, drops the record.
-`--force` if the worktree is dirty, `--keep-worktree` to stop after killing the
-session.
+A branch that is already gone — the PR was merged with "delete branch" — is
+fine; only a branch that exists and cannot be deleted stops it. `--force` if
+the worktree is dirty, `--keep-worktree` to stop after killing the session.
 
 ### Clear out merged work
 

@@ -419,7 +419,9 @@ never a clone. A repository URL or an alias means the environment on that
 repository's default branch (`origin/HEAD` read locally), found by branch in
 the registry; a repository that is not on disk has no environment. It kills
 the session, removes the worktree (`--force` when dirty; a directory that
-is already gone is just pruned), optionally deletes the branch, and drops
+is already gone is just pruned), optionally deletes the branch (one that
+is already gone counts as deleted — the usual end of a PR merged with branch
+deletion; only a branch that exists and cannot be deleted fails), and drops
 the record.
 `--keep-worktree` kills the session and keeps everything else. A target that
 is not in the registry but names a live `@workenv`-tagged session gets that
