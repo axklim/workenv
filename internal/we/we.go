@@ -1,6 +1,7 @@
 // Package we orchestrates the work environment flows: open (find or create
 // the project checkout, worktree and tmux session running claude, then
-// surface it in a terminal), attach (find only), delete, gc and list.
+// surface it in a terminal), new (open on a fresh branch, see new.go),
+// attach (find only), delete, gc and list.
 //
 // A work environment is a record in the state registry (package state)
 // keyed by an integer id: its branch, tmux session and worktree path are
@@ -53,6 +54,10 @@ type Env struct {
 	// ClaudeConfig is claude's global config file (claudecfg.Path), where
 	// a repository open clones is marked trusted when Cfg.TrustClones.
 	ClaudeConfig string
+
+	// RCTimeout is how long RemoteControlURL waits for Remote Control to
+	// come up, polling every RCInterval.
+	RCTimeout, RCInterval time.Duration
 
 	// trustErr is why the repository this Open cloned could not be marked
 	// trusted; it is reported back, not fatal (OpenResult.TrustErr).
@@ -143,12 +148,18 @@ func (e *Env) github() gh.Client { return gh.Client{R: e.R} }
 // opts.AttachOnly — repairs its worktree and tmux session, saves the
 // registry and surfaces the session in a terminal.
 func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
+	return e.open(opts, func(st *state.Store) (*state.Env, bool, error) { return e.resolve(st, opts) })
+}
+
+// open is Open with the resolution step given: everything after it —
+// repair, recording the launch flags, saving, the terminal — is shared.
+func (e *Env) open(opts OpenOptions, resolve func(*state.Store) (*state.Env, bool, error)) (OpenResult, error) {
 	e.trustErr = nil
 	st, err := state.Load(e.StatePath)
 	if err != nil {
 		return OpenResult{}, err
 	}
-	env, created, err := e.resolve(st, opts)
+	env, created, err := resolve(st)
 	if err != nil {
 		return OpenResult{}, err
 	}
@@ -232,6 +243,9 @@ func ignoredSessionFlags(opts OpenOptions) []string {
 func (e *Env) create(st *state.Store, opts OpenOptions, sp spec, existingPath string) (*state.Env, error) {
 	// The alias names the environment; placement keeps the repository name.
 	repoName := e.git().ProjectName(sp.repoPath)
+	if err := e.refuseNoWorkers(repoName); err != nil {
+		return nil, err
+	}
 	project := e.Cfg.AliasFor(repoName)
 
 	session := naming.Sanitize(opts.Session)
@@ -527,14 +541,25 @@ func (e *Env) AttachRemote(host, session string) error {
 	return e.openTerminal("ssh", "-t", host, "tmux", "attach-session", "-t", session)
 }
 
+// Delete tears down the environment t names — the one the cwd is in when t
+// is the zero Target. The session is killed last, after the worktree and
+// the record are gone: delete may run inside that very session, and dies
+// with it.
 func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, session string, err error) {
 	st, err := state.Load(e.StatePath)
 	if err != nil {
 		return 0, "", err
 	}
-	env, err := e.lookupRegistry(st, t, repo)
-	if err != nil {
-		return 0, "", err
+	var env *state.Env
+	if t == (target.Target{}) {
+		if env = e.current(st); env == nil {
+			return 0, "", fmt.Errorf("%s is not inside a work environment; pass a target", e.Cwd)
+		}
+	} else {
+		env, err = e.lookupRegistry(st, t, repo)
+		if err != nil {
+			return 0, "", err
+		}
 	}
 	if env == nil {
 		killed, err := e.killStray(t)
@@ -543,57 +568,67 @@ func (e *Env) Delete(t target.Target, repo string, opts DeleteOptions) (id int, 
 		}
 		return 0, killed, nil
 	}
-	if err := e.teardown(env, opts); err != nil {
-		return 0, "", err
-	}
-	if opts.KeepWorktree {
-		return env.ID, env.TmuxSession, nil
-	}
-	st.Remove(env.ID)
-	if err := st.Save(); err != nil {
-		return 0, "", err
-	}
-	return env.ID, env.TmuxSession, nil
-}
-
-// teardown is delete without the registry: it kills env's session, and
-// unless opts.KeepWorktree removes its worktree and optionally its branch.
-func (e *Env) teardown(env *state.Env, opts DeleteOptions) error {
-	if e.tmux().Has(env.TmuxSession) {
-		if e.tmux().IsWorkenv(env.TmuxSession) {
-			if err := e.tmux().Kill(env.TmuxSession); err != nil {
-				return err
-			}
-		} else {
-			// Someone else's session, not ours to touch (see Adoption in
-			// the design doc); teardown still proceeds for the rest.
-			fmt.Fprintf(os.Stderr, "we: tmux session %q is not a workenv session; leaving it running\n", env.TmuxSession)
+	if !opts.KeepWorktree {
+		if err := e.teardown(env, opts); err != nil {
+			return 0, "", err
+		}
+		st.Remove(env.ID)
+		if err := st.Save(); err != nil {
+			return 0, "", err
 		}
 	}
-	// Stopped on purpose: not interrupted.
+	return env.ID, env.TmuxSession, e.stopSession(env)
+}
+
+// current is the environment whose worktree contains the cwd — the one ls
+// marks — or nil. A worktree nested inside another's is the more specific
+// answer, so the longest path wins.
+func (e *Env) current(st *state.Store) *state.Env {
+	var cur *state.Env
+	for _, env := range st.Envs {
+		if within(env.WorktreePath, e.Cwd) && (cur == nil || len(env.WorktreePath) > len(cur.WorktreePath)) {
+			cur = env
+		}
+	}
+	return cur
+}
+
+// stopSession kills env's session when it is ours, and removes its running
+// marker either way: a session stopped on purpose was not interrupted.
+func (e *Env) stopSession(env *state.Env) error {
 	_ = os.Remove(e.runningMarker(env.ID))
-	if opts.KeepWorktree {
+	if !e.tmux().Has(env.TmuxSession) {
 		return nil
 	}
+	if !e.tmux().IsWorkenv(env.TmuxSession) {
+		// Someone else's session, not ours to touch (see Adoption in the
+		// design doc).
+		fmt.Fprintf(os.Stderr, "we: tmux session %q is not a workenv session; leaving it running\n", env.TmuxSession)
+		return nil
+	}
+	return e.tmux().Kill(env.TmuxSession)
+}
+
+// teardown is delete without the registry and the session: it removes
+// env's worktree and optionally its branch.
+func (e *Env) teardown(env *state.Env, opts DeleteOptions) error {
 	if env.WorktreePath == env.RepoPath {
 		// The main working tree: git refuses to remove it (even with
 		// --force) and removing its branch would leave the repository
 		// without a checked-out HEAD, so both steps are skipped.
 		fmt.Fprintf(os.Stderr, "we: %s is the repository's main working tree; leaving it and its branch in place\n", env.WorktreePath)
+		return nil
+	}
+	if _, err := os.Stat(env.WorktreePath); err == nil {
+		if err := e.git().RemoveWorktree(env.RepoPath, env.WorktreePath, opts.Force); err != nil {
+			return err
+		}
 	} else {
-		if _, err := os.Stat(env.WorktreePath); err == nil {
-			if err := e.git().RemoveWorktree(env.RepoPath, env.WorktreePath, opts.Force); err != nil {
-				return err
-			}
-		} else {
-			// Directory already gone: just let git forget it.
-			_ = e.git().Prune(env.RepoPath)
-		}
-		if opts.DeleteBranch && env.Branch != "" {
-			if err := e.git().DeleteBranch(env.RepoPath, env.Branch); err != nil {
-				return err
-			}
-		}
+		// Directory already gone: just let git forget it.
+		_ = e.git().Prune(env.RepoPath)
+	}
+	if opts.DeleteBranch && env.Branch != "" {
+		return e.git().DeleteBranch(env.RepoPath, env.Branch)
 	}
 	return nil
 }
@@ -753,17 +788,25 @@ func (e *Env) GC(opts GCOptions) ([]Retired, error) {
 		return retired, nil
 	}
 	var terr error
+	var removed []*state.Env
 	for _, env := range finished {
 		if terr = e.teardown(env, DeleteOptions{DeleteBranch: opts.DeleteBranch}); terr != nil {
 			terr = fmt.Errorf("environment %d: %w", env.ID, terr)
 			break
 		}
 		st.Remove(env.ID)
+		removed = append(removed, env)
 		retired = append(retired, Retired{ID: env.ID, Session: env.TmuxSession})
 	}
 	if len(retired) > 0 {
 		if err := st.Save(); err != nil {
 			return nil, err
+		}
+	}
+	// Sessions go last, as in Delete: gc may run in one of them.
+	for _, env := range removed {
+		if err := e.stopSession(env); err != nil && terr == nil {
+			terr = fmt.Errorf("environment %d: %w", env.ID, err)
 		}
 	}
 	return retired, terr

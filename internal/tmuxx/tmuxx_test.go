@@ -82,3 +82,14 @@ func TestListSkipsPanesWithoutSessions(t *testing.T) {
 		t.Errorf("calls = %q, want only list-sessions", got)
 	}
 }
+
+func TestCaptureReadsHistoryWithBareName(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{{Prefix: "tmux capture-pane", Out: "screen"}}}
+	out, err := Tmux{R: fake}.Capture("trade-x")
+	if err != nil || out != "screen" {
+		t.Fatalf("Capture = %q, %v", out, err)
+	}
+	if got := fake.Joined()[0]; got != "tmux capture-pane -p -J -S - -t trade-x" {
+		t.Errorf("call = %q", got)
+	}
+}

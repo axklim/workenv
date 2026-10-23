@@ -278,3 +278,25 @@ func TestAddWorktreeExistingBranchesDoNotFetch(t *testing.T) {
 		}
 	}
 }
+
+func TestBranchesMergesLocalAndOrigin(t *testing.T) {
+	f := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "git for-each-ref", Out: "refs/heads/main\nrefs/heads/feature-1\nrefs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/feature-2"},
+	}}
+	got, err := Git{R: f}.Branches("/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"main": true, "feature-1": true, "feature-2": true}
+	if len(got) != len(want) {
+		t.Errorf("Branches = %v, want %v", got, want)
+	}
+	for b := range want {
+		if !got[b] {
+			t.Errorf("Branches = %v, missing %s", got, b)
+		}
+	}
+	if c := f.Calls[0]; c.Dir != "/r" || strings.Join(c.Argv, " ") != "git for-each-ref --format=%(refname) refs/heads refs/remotes/origin" {
+		t.Errorf("call = %+v", c)
+	}
+}

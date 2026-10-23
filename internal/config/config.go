@@ -1,7 +1,7 @@
 // Package config loads workenv settings from the XDG config directory
 // ($XDG_CONFIG_HOME/workenv/config.toml, defaulting to ~/.config). Only a
-// line-based TOML subset is supported — key = "value" lines and an
-// [aliases] table header — which is enough for every setting we has and
+// line-based TOML subset is supported — key = "value" lines and the
+// [aliases] and [no_workers] table headers — which is enough for every setting we has and
 // needs no TOML library.
 package config
 
@@ -33,6 +33,21 @@ type Config struct {
 	// Aliases maps a short name to a repository name in ProjectsPath; the
 	// alias is the project name of every environment created in it.
 	Aliases map[string]string
+	// NoWorkers maps a repository, by name or alias, to the hint given when
+	// a work environment would be created in it.
+	NoWorkers map[string]string
+}
+
+// NoWorkersFor reports whether the repository named repo takes no work
+// environments, with the key it is listed under and its hint. The key may
+// be the repository name or its alias.
+func (c Config) NoWorkersFor(repo string) (key, hint string, ok bool) {
+	for _, k := range []string{repo, c.AliasFor(repo)} {
+		if hint, ok := c.NoWorkers[k]; ok {
+			return k, hint, true
+		}
+	}
+	return "", "", false
 }
 
 // AliasFor returns the alias of the repository named repo, or repo itself
@@ -91,7 +106,7 @@ func parse(raw, home string) (Config, error) {
 		// header, so top-level keys must come before it.
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			table = strings.TrimSpace(line[1 : len(line)-1])
-			if table != "aliases" {
+			if table != "aliases" && table != "no_workers" {
 				return Config{}, fmt.Errorf("config line %d: unknown table [%s]", i+1, table)
 			}
 			continue
@@ -104,6 +119,12 @@ func parse(raw, home string) (Config, error) {
 		val = strings.Trim(strings.TrimSpace(val), `"`)
 		if table == "aliases" {
 			if err := cfg.addAlias(key, val); err != nil {
+				return Config{}, fmt.Errorf("config line %d: %w", i+1, err)
+			}
+			continue
+		}
+		if table == "no_workers" {
+			if err := cfg.addNoWorkers(key, val); err != nil {
 				return Config{}, fmt.Errorf("config line %d: %w", i+1, err)
 			}
 			continue
@@ -166,6 +187,22 @@ func (c *Config) addAlias(alias, repo string) error {
 		c.Aliases = map[string]string{}
 	}
 	c.Aliases[alias] = repo
+	return nil
+}
+
+// addNoWorkers records that repo, a repository name or alias, takes no work
+// environments; hint may be empty.
+func (c *Config) addNoWorkers(repo, hint string) error {
+	if repo == "" || naming.Sanitize(repo) != repo {
+		return fmt.Errorf("no_workers %q: use a repository name or alias", repo)
+	}
+	if _, dup := c.NoWorkers[repo]; dup {
+		return fmt.Errorf("no_workers %s is defined twice", repo)
+	}
+	if c.NoWorkers == nil {
+		c.NoWorkers = map[string]string{}
+	}
+	c.NoWorkers[repo] = hint
 	return nil
 }
 

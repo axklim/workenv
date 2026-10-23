@@ -68,19 +68,123 @@ func TestRunOpenStartsClaudeWithRemoteControl(t *testing.T) {
 
 	fake := &execx.Fake{Responses: []execx.FakeResponse{
 		{Prefix: "tmux has-session", Err: errors.New("no server running")},
+		{Prefix: "tmux capture-pane -p -J -S - -t proj-x", Out: "/remote-control is active\nhttps://claude.ai/code/session_01abc\n"},
 	}}
 	env := &we.Env{Cfg: config.Config{ClaudeCmd: "claude"}, R: fake, StatePath: statePath, Cwd: root}
 
 	opts, _ := parse(t, "open", "proj-x", "--rc", "--no-terminal")
-	captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		if err := runOpen(env, "open", opts.Open, false); err != nil {
 			t.Fatalf("runOpen: %v", err)
 		}
 	})
+	if !strings.HasSuffix(out, "WE_SESSION=proj-x\nrc: https://claude.ai/code/session_01abc\n") {
+		t.Errorf("rc: <url> must be the last line:\n%s", out)
+	}
 	claude := "claude --name proj-x --remote-control proj-x"
 	want := "tmux send-keys -t proj-x " + claude + " --continue || " + claude + "; rm -f '" + filepath.Join(root, "running", "1") + "' Enter"
 	if !slices.Contains(fake.Joined(), want) {
 		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+	}
+}
+
+// TestRunOpenRCTimeout: no Remote Control in time is rc: timeout as the
+// last line, the screen's last lines on stderr, and an error.
+func TestRunOpenRCTimeout(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, "envs.json")
+	st := &state.Store{Path: statePath}
+	st.Add(&state.Env{Project: "proj", Branch: "x", TmuxSession: "proj-x", WorktreePath: root, RepoPath: root})
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "git symbolic-ref --short -q HEAD", Out: "x"},
+		{Prefix: "tmux show-options", Out: "@workenv 1"},
+		{Prefix: "tmux capture-pane", Out: "Is this a project you trust?"},
+	}}
+	env := &we.Env{Cfg: config.Config{ClaudeCmd: "claude"}, R: fake, StatePath: statePath, Cwd: root}
+	opts, _ := parse(t, "open", "1", "--rc", "--no-terminal")
+	var err error
+	out := captureStdout(t, func() { err = runOpen(env, "open", opts.Open, false) })
+	if !errors.Is(err, we.ErrRCTimeout) {
+		t.Errorf("err = %v, want ErrRCTimeout", err)
+	}
+	if !strings.HasSuffix(out, "\nrc: timeout\n") {
+		t.Errorf("rc: timeout must be the last line:\n%s", out)
+	}
+	if got := lastLines("a\n\n  \nb\nc\n", 2); !slices.Equal(got, []string{"b", "c"}) {
+		t.Errorf("lastLines = %q", got)
+	}
+}
+
+// TestParseNew: new takes one or two positionals and open's flags but
+// --repo and --branch, which its arguments say.
+func TestParseNew(t *testing.T) {
+	opts, name := parse(t, "new", "infra", "review", "--no-terminal", "--rc", "--prompt", "go", "--model", "opus", "--effort", "high", "--session", "s", "--wt", "w", "--host", "h")
+	n := opts.New
+	if name != "new" || n.Args.What != "infra" || n.Args.Name != "review" || !n.NoTerminal || !n.RC || n.Prompt != "go" ||
+		n.Model != "opus" || n.Effort != "high" || n.Session != "s" || n.Wt != "w" || n.Host != "h" {
+		t.Errorf("new parsed as %+v", n)
+	}
+	if opts, _ := parse(t, "new", "infra"); opts.New.Args.Name != "" {
+		t.Errorf("name = %q, want none", opts.New.Args.Name)
+	}
+	for _, args := range [][]string{{"new"}, {"new", "x", "--repo", "r"}, {"new", "x", "--branch", "b"}} {
+		var o options
+		if _, err := newParser(&o).ParseArgs(args); err == nil {
+			t.Errorf("ParseArgs(%q) succeeded; want an error", args)
+		}
+	}
+}
+
+// TestRunNewPrintsReadingFirst: the reading comes before open's output.
+func TestRunNewPrintsReadingFirst(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "projects", "proj")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "git show-ref", Err: errors.New("no")},
+		{Prefix: "git symbolic-ref --short refs/remotes/origin/HEAD", Err: errors.New("no")},
+		{Prefix: "git symbolic-ref --short HEAD", Out: "main"},
+		{Prefix: "tmux has-session", Err: errors.New("no server running")},
+	}}
+	env := &we.Env{Cfg: config.Config{ClaudeCmd: "claude", ProjectsPath: filepath.Join(root, "projects"), WorktreePath: "{{ .repo_path }}/../{{ .repo }}.{{ .branch | sanitize }}"},
+		R: fake, StatePath: filepath.Join(root, "envs.json"), Cwd: root}
+	opts, _ := parse(t, "new", "proj", "--no-terminal")
+	out := captureStdout(t, func() {
+		if err := runNew(env, opts.New); err != nil {
+			t.Fatalf("runNew: %v", err)
+		}
+	})
+	if !strings.HasPrefix(out, "repo: proj (projects_path)\nbranch: feature-1 (next free)\ncreated environment 1\n") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestRunNewAndDeletePassThroughToRemote(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "ssh devbox we new infra review", Out: "WE_SESSION=infra-review\n"},
+	}}
+	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
+	opts, _ := parse(t, "new", "infra", "review", "--host", "devbox", "--no-terminal", "--rc", "--session", "s")
+	captureStdout(t, func() {
+		if err := runNew(env, opts.New); err != nil {
+			t.Fatalf("runNew: %v", err)
+		}
+	})
+	opts, _ = parse(t, "delete", "--host", "devbox", "--delete-branch")
+	if err := runDelete(env, opts.Delete); err != nil {
+		t.Fatalf("runDelete: %v", err)
+	}
+	want := []string{
+		"ssh devbox we new infra review --no-terminal --session s --rc",
+		"ssh devbox we delete --delete-branch",
+	}
+	if got := fake.Joined(); !slices.Equal(got, want) {
+		t.Errorf("calls = %q, want %q", got, want)
 	}
 }
 
@@ -150,7 +254,7 @@ func TestOpenRemoteUsesOutputPassStderr(t *testing.T) {
 
 	// noTerminal:true keeps this to the one ssh call — no local AttachRemote.
 	c := openCmd{attachCmd: attachCmd{hostOpt: hostOpt{Host: "devbox"}, NoTerminal: true}}
-	if err := openRemote(env, "open", "7", c); err != nil {
+	if err := openRemote(env, []string{"open", "7"}, c); err != nil {
 		t.Fatalf("openRemote: %v", err)
 	}
 
@@ -180,11 +284,11 @@ func TestOpenRemotePassesThroughOverridesInOrder(t *testing.T) {
 	env := &we.Env{Cfg: config.Config{RemoteWe: "we"}, R: fake}
 
 	c := openCmd{
-		attachCmd: attachCmd{hostOpt: hostOpt{Host: "devbox"}, repoOpt: repoOpt{Repo: "trade"}, NoTerminal: true},
-		overrides: overrides{Branch: "feature-1", Session: "sess", Wt: "~/wt"},
-		RC:        true, Model: "opus[1m]", Effort: "high", Prompt: "don't stop",
+		attachCmd:    attachCmd{hostOpt: hostOpt{Host: "devbox"}, repoOpt: repoOpt{Repo: "trade"}, NoTerminal: true},
+		overrides:    overrides{Branch: "feature-1", Session: "sess", Wt: "~/wt"},
+		sessionFlags: sessionFlags{RC: true, Model: "opus[1m]", Effort: "high", Prompt: "don't stop"},
 	}
-	if err := openRemote(env, "open", "feature-1", c); err != nil {
+	if err := openRemote(env, []string{"open", "feature-1"}, c); err != nil {
 		t.Fatalf("openRemote: %v", err)
 	}
 	want := `ssh devbox we open feature-1 --no-terminal --repo trade --branch feature-1 --session sess --wt ~/wt --rc --model 'opus[1m]' --effort 'high' --prompt 'don'\''t stop'`

@@ -69,6 +69,13 @@ func (t Tmux) RunInFirstWindow(session, cmd string) error {
 	return err
 }
 
+// Capture returns the text of the session's active pane, its scrollback
+// included, with wrapped lines joined.
+func (t Tmux) Capture(session string) (string, error) {
+	// capture-pane takes a pane target, which rejects the "=" syntax.
+	return t.R.Output("", "tmux", "capture-pane", "-p", "-J", "-S", "-", "-t", session)
+}
+
 func (t Tmux) Kill(session string) error {
 	_, err := t.R.Output("", "tmux", "kill-session", "-t", "="+session)
 	return err
