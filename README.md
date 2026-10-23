@@ -127,6 +127,9 @@ claude_cmd    = "claude"       # command run in the first tmux window,
                                # with --name <session> appended
 remote_control = false         # also append --remote-control <session>;
                                # `we open --rc` does it for one open
+trust_clones  = false          # mark a repository open clones as trusted
+                               # in ~/.claude.json, so claude does not
+                               # stop on its trust dialog there
 remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go — a Go text/template; variables and filters are

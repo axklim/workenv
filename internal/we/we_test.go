@@ -1,6 +1,7 @@
 package we
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -385,6 +386,148 @@ func TestOpenRepoURLClonesWhenMissing(t *testing.T) {
 	}
 	if rec := loadState(t, env).ByID(res.ID); rec == nil || rec.RepoPath != dest {
 		t.Errorf("record = %+v", rec)
+	}
+}
+
+// watchRunner calls before ahead of every command the Fake records, so a
+// test can look at the filesystem as it was when that command ran.
+type watchRunner struct {
+	*execx.Fake
+	before func(cmd string)
+}
+
+func (w watchRunner) Output(dir, name string, args ...string) (string, error) {
+	w.before(strings.Join(append([]string{name}, args...), " "))
+	return w.Fake.Output(dir, name, args...)
+}
+
+// claudeTrusted reads projects[dir].hasTrustDialogAccepted from claude's
+// config file; nil when the file, the project or the key is missing.
+func claudeTrusted(t *testing.T, file, dir string) any {
+	t.Helper()
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Projects map[string]map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("%s: %v", file, err)
+	}
+	return cfg.Projects[dir]["hasTrustDialogAccepted"]
+}
+
+// TestOpenTrustsClone: with trust_clones, a repository open clones is
+// marked trusted in claude's config before the session starts — keyed by
+// the repository, which its worktrees share — and the rest of the file is
+// kept.
+func TestOpenTrustsClone(t *testing.T) {
+	for name, tgt := range map[string]target.Target{
+		"repository URL": repoURL("acme", "newrepo"),
+		"issue URL":      {Kind: target.KindIssue, Owner: "acme", Repo: "newrepo", Number: 5},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := &execx.Fake{Responses: append([]execx.FakeResponse{
+				{Prefix: "gh issue view 5", Out: `{"number":5,"title":"Fix it","closedByPullRequestsReferences":[]}`},
+			}, newBranchResponses...)}
+			env, _ := newTestEnv(t, fake)
+			env.Cfg.TrustClones = true
+			env.ClaudeConfig = filepath.Join(t.TempDir(), ".claude.json")
+			if err := os.WriteFile(env.ClaudeConfig, []byte(`{"numStartups": 3, "projects": {"/x": {"a": 1}}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			dest := filepath.Join(env.Cfg.ProjectsPath, "newrepo")
+			var atSessionStart any
+			env.R = watchRunner{Fake: fake, before: func(cmd string) {
+				if strings.HasPrefix(cmd, "tmux new-session") {
+					atSessionStart = claudeTrusted(t, env.ClaudeConfig, dest)
+				}
+			}}
+
+			res, err := env.Open(OpenOptions{Target: tgt, NoTerminal: true})
+			if err != nil {
+				t.Fatalf("Open error: %v", err)
+			}
+			if res.TrustErr != nil {
+				t.Errorf("TrustErr = %v", res.TrustErr)
+			}
+			if atSessionStart != true {
+				t.Errorf("hasTrustDialogAccepted when the session started = %v, want true", atSessionStart)
+			}
+			if res.WorktreePath != dest {
+				if got := claudeTrusted(t, env.ClaudeConfig, res.WorktreePath); got != nil {
+					t.Errorf("worktree %s got its own entry %v; it shares the repository's", res.WorktreePath, got)
+				}
+			}
+			if got := claudeTrusted(t, env.ClaudeConfig, "/x"); got != nil {
+				t.Errorf("other project gained the key: %v", got)
+			}
+			raw, _ := os.ReadFile(env.ClaudeConfig)
+			if !strings.Contains(string(raw), `"numStartups": 3`) || !strings.Contains(string(raw), `"a": 1`) {
+				t.Errorf("other values lost:\n%s", raw)
+			}
+		})
+	}
+}
+
+// TestOpenTrustsOnlyWhatItClones: trust_clones off leaves claude's config
+// alone, and so does an open that finds the repository already on disk.
+func TestOpenTrustsOnlyWhatItClones(t *testing.T) {
+	t.Run("trust_clones off", func(t *testing.T) {
+		fake := &execx.Fake{Responses: newBranchResponses}
+		env, _ := newTestEnv(t, fake)
+		env.ClaudeConfig = filepath.Join(t.TempDir(), ".claude.json")
+		if _, err := env.Open(OpenOptions{Target: repoURL("acme", "newrepo"), NoTerminal: true}); err != nil {
+			t.Fatalf("Open error: %v", err)
+		}
+		if !hasCall(fake, "gh repo clone") {
+			t.Fatal("expected a clone")
+		}
+		if _, err := os.Stat(env.ClaudeConfig); err == nil {
+			t.Error("claude's config was written with trust_clones off")
+		}
+	})
+	t.Run("repository already on disk", func(t *testing.T) {
+		fake := &execx.Fake{Responses: newBranchResponses}
+		env, _ := newTestEnv(t, fake)
+		env.Cfg.TrustClones = true
+		env.ClaudeConfig = filepath.Join(t.TempDir(), ".claude.json")
+		if _, err := env.Open(OpenOptions{Target: repoURL("acme", "proj"), NoTerminal: true}); err != nil {
+			t.Fatalf("Open error: %v", err)
+		}
+		if hasCall(fake, "gh repo clone") {
+			t.Fatal("proj is on disk; nothing should be cloned")
+		}
+		if _, err := os.Stat(env.ClaudeConfig); err == nil {
+			t.Error("claude's config was written for a repository open did not clone")
+		}
+	})
+}
+
+// TestOpenTrustFailureIsReported: an unreadable claude config does not
+// fail open — the session just starts on the dialog — and is not
+// overwritten.
+func TestOpenTrustFailureIsReported(t *testing.T) {
+	fake := &execx.Fake{Responses: newBranchResponses}
+	env, _ := newTestEnv(t, fake)
+	env.Cfg.TrustClones = true
+	env.ClaudeConfig = filepath.Join(t.TempDir(), ".claude.json")
+	if err := os.WriteFile(env.ClaudeConfig, []byte(`{"projects": `), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := env.Open(OpenOptions{Target: repoURL("acme", "newrepo"), NoTerminal: true})
+	if err != nil {
+		t.Fatalf("Open error: %v", err)
+	}
+	if res.TrustErr == nil {
+		t.Error("TrustErr = nil, want the parse error")
+	}
+	if !hasCall(fake, "tmux new-session") {
+		t.Error("the session must still start")
+	}
+	if raw, _ := os.ReadFile(env.ClaudeConfig); string(raw) != `{"projects": ` {
+		t.Errorf("malformed config rewritten:\n%s", raw)
 	}
 }
 
