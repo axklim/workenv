@@ -1,10 +1,10 @@
 ---
-name: we-remove
-description: Use when asked to remove, tear down or close a work environment made with `we`, or this session's own one. Invoked as /we-remove [target]; with no target it removes the environment this session runs in.
+name: close
+description: Use when asked to remove, tear down or close a work environment made with `we`, or this session's own one. Invoked as /workenv:close [target]; with no target it removes the environment this session runs in.
 argument-hint: "[target]"
 ---
 
-# `/we-remove [target]`
+# `/workenv:close [target]`
 
 Removes a work environment: its worktree, its branch, its record, and its
 tmux session, which goes last.

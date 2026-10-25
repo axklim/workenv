@@ -1,6 +1,6 @@
 ---
-name: we
-description: Use when asked to open, start, run, list, attach to, show or tear down a work environment or claude session for a project, GitHub issue, PR or branch with the `we` (workenv) CLI, including dispatching a task to a new session or making one reachable from another device. Invoked as /we <repo | alias | issue URL | .> [name] it starts a worker session and reports its Remote Control link.
+name: open
+description: Use when asked to open, start, run, list, attach to, show or tear down a work environment or claude session for a project, GitHub issue, PR or branch with the `we` (workenv) CLI, including dispatching a task to a new session or making one reachable from another device. Invoked as /workenv:open <repo | alias | issue URL | .> [name] it starts a worker session and reports its Remote Control link.
 argument-hint: <repo | alias | issue URL | .> [name]
 ---
 
@@ -14,7 +14,7 @@ branch, from a repository and maybe a name. Every other command takes the same
 `<target>` (id, session name, branch, issue, PR or repository URL, plain name).
 `we <command> --help` has the flags; this is the judgment the help cannot make.
 
-## `/we <repo | alias | issue URL | .> [name]`
+## `/workenv:open <repo | alias | issue URL | .> [name]`
 
 Run exactly this, with the arguments as given:
 
@@ -45,9 +45,9 @@ Do not pick a branch, add `--repo`, or rephrase the arguments.
 | "pick up PR 61" | `we open https://github.com/OWNER/trade/pull/61` |
 | "open the infra project" (its home, on `main`) | `we open infra` or `we open https://github.com/OWNER/infra` |
 | "back to environment 7 / session infra-review" | `we attach 7`, `we attach infra-review` (`open` works too) |
-| "what is running?" | `we ls` (`/we-list`) |
+| "what is running?" | `we ls` (`/workenv:list`) |
 | "details of 7" | `we show 7` |
-| "tear down 7", "remove this session" | `we delete 7`, `we delete` (`/we-remove`) |
+| "tear down 7", "remove this session" | `we delete 7`, `we delete` (`/workenv:close`) |
 | "clean up finished work" | `we gc --dry-run`, then `we gc` |
 
 Add `--no-terminal` to every `new`, `open` and `attach` run for someone else.

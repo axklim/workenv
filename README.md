@@ -47,6 +47,22 @@ works — the binary then reports its version as `dev`, since nothing stamped it
 
 `make help` lists all targets.
 
+## Install the Claude Code plugin
+
+The [Claude Code skills](#claude-code-skills) are a plugin, and this
+repository is its marketplace:
+
+```
+claude plugin marketplace add axklim/workenv
+claude plugin install workenv@workenv
+```
+
+Updates come with `claude plugin update workenv@workenv`, or on their own once
+auto-update is on for the marketplace (`/plugin` → Marketplaces → workenv →
+Enable auto-update). The plugin follows `main`, not the release, so a skill
+can name a flag before `brew upgrade` brings it; the skills say which version
+each one needs.
+
 ## Usage
 
 ```
@@ -171,22 +187,16 @@ branch is adopted rather than duplicated.
 Three skills give any Claude Code session — one `we` opened included — slash
 commands to start and remove work environments of its own:
 
-- `/we <repo | alias | issue URL | .> [name]` runs `we new … --no-terminal
-  --rc` and reports the session and its Remote Control link; it also teaches
-  a session the rest of `we` (targets, flags, reading `we ls`).
-- `/we-remove [target]` runs `we delete --delete-branch`, the current
+- `/workenv:open <repo | alias | issue URL | .> [name]` runs `we new …
+  --no-terminal --rc` and reports the session and its Remote Control link; it
+  also teaches a session the rest of `we` (targets, flags, reading `we ls`).
+- `/workenv:close [target]` runs `we delete --delete-branch`, the current
   environment when no target is given.
-- `/we-list` runs `we ls`.
+- `/workenv:list` runs `we ls`.
 
-Every decision is `we`'s own, so the skills stay thin. They ship with the
-binary, so the skills you have always match the `we` you have; link each one:
-
-```
-for s in "$(brew --prefix)"/share/workenv/skills/*; do ln -s "$s" ~/.claude/skills/; done
-```
-
-The repository is also a Claude Code plugin (`.claude-plugin/plugin.json`,
-name `workenv`) for anyone who installs skills through a marketplace instead.
+Every decision is `we`'s own, so the skills stay thin. They come from the
+`workenv` plugin, not from the formula; see
+[Install the Claude Code plugin](#install-the-claude-code-plugin).
 
 ## How it works
 

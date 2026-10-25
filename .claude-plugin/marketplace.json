@@ -1,0 +1,11 @@
+{
+  "name": "workenv",
+  "description": "The workenv plugin: Claude Code skills that drive the we CLI.",
+  "owner": { "name": "axklim" },
+  "plugins": [
+    {
+      "name": "workenv",
+      "source": "./"
+    }
+  ]
+}

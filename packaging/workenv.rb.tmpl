@@ -38,7 +38,6 @@ class Workenv < Formula
 
   def install
     bin.install "we"
-    pkgshare.install "skills"
   end
 
   def caveats
@@ -54,15 +53,11 @@ class Workenv < Formula
       Neither is needed for `we open --no-terminal`, nor on a remote host
       reached with `we --host`.
 
-      The Claude Code skills that drive `we` (/we, /we-remove, /we-list)
-      ship here:
+      The Claude Code skills that drive `we` (/workenv:open, /workenv:list,
+      /workenv:close) are a plugin, installed from Claude Code:
 
-        #{pkgshare}/skills
-
-      Link every one into ~/.claude/skills/ (or let your dotfiles do it) so
-      the skills always match the installed version:
-
-        for s in #{pkgshare}/skills/*; do ln -s "$s" ~/.claude/skills/; done
+        claude plugin marketplace add axklim/workenv
+        claude plugin install workenv@workenv
     EOS
   end
 
@@ -73,8 +68,5 @@ class Workenv < Formula
 
     # `we` with no arguments exits non-zero, so the usage check uses `help`.
     assert_match "we open", shell_output("#{bin}/we help")
-    %w[we we-remove we-list].each do |skill|
-      assert_path_exists pkgshare/"skills/#{skill}/SKILL.md"
-    end
   end
 end
