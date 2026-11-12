@@ -21,13 +21,17 @@ type NewPlan struct {
 	Branch   string        // with Target: --branch; otherwise the branch to open
 	RepoPath string        // the repository of Branch, without Target
 	Reading  []string
+
+	trustErr error // the clone PlanNew made could not be marked trusted
 }
 
 // PlanNew reads `we new`'s one or two arguments (see the design doc's
 // *new*): an issue or PR URL, optionally with a branch name; a repository
 // and a name; a repository alone, for the next free feature-N; or a name in
-// the cwd's repository. It refuses a repository listed in no_workers.
+// the cwd's repository. It clones a repository that is not on disk, and
+// refuses one listed in no_workers.
 func (e *Env) PlanNew(args []string) (NewPlan, error) {
+	e.trustErr = nil
 	if len(args) == 0 || len(args) > 2 {
 		return NewPlan{}, errors.New("we new takes a repository, an issue URL or a name, and optionally a name")
 	}
@@ -65,7 +69,7 @@ func (e *Env) PlanNew(args []string) (NewPlan, error) {
 	if err := e.refuseNoWorkers(e.git().ProjectName(repoPath)); err != nil {
 		return NewPlan{}, err
 	}
-	p := NewPlan{RepoPath: repoPath, Branch: name, Reading: []string{fmt.Sprintf("repo: %s (%s)", repoBase(repoPath), how)}}
+	p := NewPlan{RepoPath: repoPath, Branch: name, Reading: []string{fmt.Sprintf("repo: %s (%s)", repoBase(repoPath), how)}, trustErr: e.trustErr}
 	if name != "" {
 		p.Reading = append(p.Reading, "branch: "+name+" (given)")
 		return p, nil
@@ -78,10 +82,12 @@ func (e *Env) PlanNew(args []string) (NewPlan, error) {
 }
 
 // newRepo resolves arg as `we new`'s repository and says how: "." is the
-// cwd's; a repository URL is found where open would find it, but never
-// cloned; an alias, a directory in projects_path or a path follow --repo.
-// Unless explicit — a name follows — an arg that is none of these, or is
-// the cwd's own repository, gives "" and no error: it is a branch.
+// cwd's; a repository URL is found where open would find it, or cloned
+// like open clones it; an alias, a directory in projects_path or a path
+// follow --repo. When explicit — a name follows — a bare name that is none
+// of these is cloned from default_owner, when set. Unless explicit, an arg
+// that is none of these, or is the cwd's own repository, gives "" and no
+// error: it is a branch.
 func (e *Env) newRepo(arg string, t target.Target, explicit bool) (path, how string, err error) {
 	cwdRepo := e.git().RepoRoot(e.Cwd)
 	switch {
@@ -93,7 +99,7 @@ func (e *Env) newRepo(arg string, t target.Target, explicit bool) (path, how str
 	case t.Kind == target.KindRepo:
 		path, err := e.repoForTarget(t, true)
 		if err != nil {
-			return "", "", fmt.Errorf("%s is not cloned; we open %s clones it", t.String(), t.URL())
+			return e.cloneForNew(t.Owner, t.Repo)
 		}
 		if path == cwdRepo {
 			return path, "cwd", nil
@@ -119,10 +125,25 @@ func (e *Env) newRepo(arg string, t target.Target, explicit bool) (path, how str
 	if path, ok := gitx.FindProjectDir(e.Cfg.ProjectsPath, arg); ok {
 		return e.notCwd(path, cwdRepo, "projects_path", explicit)
 	}
-	if explicit {
-		return "", "", fmt.Errorf("repository %q not found in %s", arg, e.Cfg.ProjectsPath)
+	if !explicit {
+		return "", "", nil
 	}
-	return "", "", nil
+	if e.Cfg.DefaultOwner == "" {
+		return "", "", fmt.Errorf("repository %q not found in %s; pass its URL to clone it, or set default_owner", arg, e.Cfg.ProjectsPath)
+	}
+	return e.cloneForNew(e.Cfg.DefaultOwner, arg)
+}
+
+// cloneForNew clones owner/repo for newRepo, unless repo takes no work
+// environments: a refused repository is not worth a clone.
+func (e *Env) cloneForNew(owner, repo string) (path, how string, err error) {
+	if err := e.refuseNoWorkers(repo); err != nil {
+		return "", "", err
+	}
+	if path, err = e.clone(owner, repo); err != nil {
+		return "", "", fmt.Errorf("%s/%s is not in %s and could not be cloned: %w", owner, repo, e.Cfg.ProjectsPath, err)
+	}
+	return path, "cloned " + owner + "/" + repo, nil
 }
 
 // notCwd is newRepo's answer for a repository it found: a lone argument
@@ -162,6 +183,7 @@ func (e *Env) New(p NewPlan, opts OpenOptions) (OpenResult, error) {
 		return e.Open(opts)
 	}
 	opts.Target = target.Target{Kind: target.KindName, Name: p.Branch}
+	e.trustErr = p.trustErr
 	return e.open(opts, func(st *state.Store) (*state.Env, bool, error) {
 		owner, _, _ := e.git().OriginGitHubRepo(p.RepoPath)
 		return e.finish(st, opts, spec{repoPath: p.RepoPath, owner: owner, branch: p.Branch}, opts.Target)

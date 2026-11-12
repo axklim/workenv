@@ -2,6 +2,7 @@ package we
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -118,9 +119,9 @@ func TestPlanNewErrors(t *testing.T) {
 	}{
 		{"outside any repository", []string{"spike"}, "not inside a repository"},
 		{"dot outside any repository", []string{"."}, "not inside a repository"},
-		{"unknown explicit repository", []string{"nosuch", "x"}, `"nosuch" not found`},
+		{"unknown explicit repository", []string{"nosuch", "x"}, `"nosuch" not found in`},
+		{"unknown explicit repository hints at the URL", []string{"nosuch", "x"}, "pass its URL to clone it, or set default_owner"},
 		{"explicit path that is no repository", []string{"/nowhere/x", "x"}, "not a git repository"},
-		{"repository URL not cloned", []string{"https://github.com/acme/nosuch"}, "we open https://github.com/acme/nosuch clones it"},
 		{"three arguments", []string{"a", "b", "c"}, "optionally a name"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,6 +129,151 @@ func TestPlanNewErrors(t *testing.T) {
 			_, err := env.PlanNew(tc.args)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("PlanNew(%q) error = %v, want one containing %q", tc.args, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestPlanNewClonesMissingRepository: a repository URL, or with
+// default_owner a bare name followed by a branch, is cloned into
+// projects_path when it is not there, and the reading says so.
+func TestPlanNewClonesMissingRepository(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		owner    string // default_owner
+		clone    string // the gh repo clone argument
+		readings []string
+	}{
+		{"repository URL and name", []string{"https://github.com/acme/newrepo", "x"}, "", "acme/newrepo",
+			[]string{"repo: newrepo (cloned acme/newrepo)", "branch: x (given)"}},
+		{"repository URL alone", []string{"https://github.com/acme/newrepo"}, "", "acme/newrepo",
+			[]string{"repo: newrepo (cloned acme/newrepo)", "branch: feature-1 (next free)"}},
+		{"repository URL ignores default_owner", []string{"https://github.com/acme/newrepo", "x"}, "else", "acme/newrepo",
+			[]string{"repo: newrepo (cloned acme/newrepo)", "branch: x (given)"}},
+		{"bare name with default_owner", []string{"newrepo", "x"}, "acme", "acme/newrepo",
+			[]string{"repo: newrepo (cloned acme/newrepo)", "branch: x (given)"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &execx.Fake{}
+			env, _, _ := newEnvWithRepos(t, fake)
+			env.Cfg.DefaultOwner = tc.owner
+			p, err := env.PlanNew(tc.args)
+			if err != nil {
+				t.Fatalf("PlanNew(%q): %v", tc.args, err)
+			}
+			dest := filepath.Join(env.Cfg.ProjectsPath, "newrepo")
+			if p.RepoPath != dest || !slices.Equal(p.Reading, tc.readings) {
+				t.Errorf("PlanNew(%q) = %+v, want repo %q, reading %q", tc.args, p, dest, tc.readings)
+			}
+			var clones []execx.FakeCall
+			for _, c := range fake.Calls {
+				if strings.HasPrefix(strings.Join(c.Argv, " "), "gh repo clone") {
+					clones = append(clones, c)
+				}
+			}
+			if len(clones) != 1 || !slices.Equal(clones[0].Argv, []string{"gh", "repo", "clone", tc.clone, dest}) || clones[0].Method != "Run" {
+				t.Errorf("clone calls = %+v, want one Run of gh repo clone %s %s", clones, tc.clone, dest)
+			}
+		})
+	}
+}
+
+// TestPlanNewClonesNothingElse: default_owner gives an owner only to the
+// explicit two-argument form, a repository on disk is never cloned, and a
+// repository listed in no_workers is refused before any clone.
+func TestPlanNewClonesNothingElse(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		inRepo  bool
+		wantErr string
+	}{
+		{"a lone bare name stays a branch", []string{"newrepo"}, true, ""},
+		{"a lone bare name outside any repository", []string{"newrepo"}, false, "not inside a repository"},
+		{"a repository on disk", []string{"other", "x"}, false, ""},
+		{"a repository URL on disk", []string{"https://github.com/acme/other", "x"}, false, ""},
+		{"no_workers, bare name", []string{"chat", "x"}, false, "chat takes no work environments"},
+		{"no_workers, repository URL", []string{"https://github.com/acme/chat"}, false, "chat takes no work environments"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &execx.Fake{}
+			env, proj, _ := newEnvWithRepos(t, fake)
+			env.Cfg.DefaultOwner = "acme"
+			env.Cfg.NoWorkers = map[string]string{"chat": ""}
+			if tc.inRepo {
+				env.Cwd = proj
+			}
+			_, err := env.PlanNew(tc.args)
+			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Errorf("PlanNew(%q) error = %v, want %q", tc.args, err, tc.wantErr)
+			}
+			if hasCall(fake, "gh repo clone") {
+				t.Errorf("PlanNew(%q) cloned:\n%s", tc.args, strings.Join(fake.Joined(), "\n"))
+			}
+		})
+	}
+}
+
+// TestPlanNewCloneFailure: a typo in a bare name is a failed clone, and
+// the error names the repository it looked for and where.
+func TestPlanNewCloneFailure(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{{Prefix: "gh repo clone", Err: errFake}}}
+	env, _, _ := newEnvWithRepos(t, fake)
+	env.Cfg.DefaultOwner = "acme"
+	_, err := env.PlanNew([]string{"tpyo", "x"})
+	want := "acme/tpyo is not in " + env.Cfg.ProjectsPath + " and could not be cloned: " + errFake.Error()
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
+// TestNewTrustsClone: with trust_clones, the repository new clones is
+// trusted before the session starts, and a failure to trust it reaches
+// the result as it does for open.
+func TestNewTrustsClone(t *testing.T) {
+	for _, tc := range []struct {
+		name, config string
+		trusted      bool
+	}{
+		{"trusted", `{}`, true},
+		{"unreadable config", `{"projects": `, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &execx.Fake{Responses: newBranchResponses}
+			env, _ := newTestEnv(t, fake)
+			env.Cfg.TrustClones = true
+			env.ClaudeConfig = filepath.Join(t.TempDir(), ".claude.json")
+			if err := os.WriteFile(env.ClaudeConfig, []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			dest := filepath.Join(env.Cfg.ProjectsPath, "newrepo")
+			var atSessionStart any
+			env.R = watchRunner{Fake: fake, before: func(cmd string) {
+				if strings.HasPrefix(cmd, "tmux new-session") && tc.trusted {
+					atSessionStart = claudeTrusted(t, env.ClaudeConfig, dest)
+				}
+			}}
+
+			p, err := env.PlanNew([]string{"https://github.com/acme/newrepo", "x"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := env.New(p, OpenOptions{NoTerminal: true})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if !res.Created || res.RepoPath != dest || res.Branch != "x" {
+				t.Errorf("res = %+v", res)
+			}
+			if tc.trusted && (res.TrustErr != nil || atSessionStart != true) {
+				t.Errorf("TrustErr = %v, trusted at session start = %v; want nil, true", res.TrustErr, atSessionStart)
+			}
+			if !tc.trusted && res.TrustErr == nil {
+				t.Error("TrustErr = nil, want the parse error")
+			}
+			if rec := loadState(t, env).ByID(1); rec == nil || rec.RepoPath != dest || rec.Project != "newrepo" {
+				t.Errorf("record = %+v", rec)
 			}
 		})
 	}

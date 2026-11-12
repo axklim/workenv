@@ -231,7 +231,7 @@ needed, and its main working tree is the default branch's worktree.
 "Is this a project you trust?" dialog and waits there — with `--rc`, Remote
 Control is not up until it is answered, and `--prompt` waits too. A trusted
 parent directory does not answer it for a new repository under it. With
-`trust_clones = true`, `open` answers it for the repository it just cloned,
+`trust_clones = true`, `open` or `new` answers it for the repository it just cloned,
 right after the clone and so before any session starts: it sets
 `projects["<repository path>"].hasTrustDialogAccepted = true` in claude's
 global config (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`),
@@ -380,8 +380,16 @@ we new . [name]             the cwd's repository, explicitly
 
 A repository is an alias, a directory under `projects_path`, a path (as for
 `--repo`), `.` for the cwd's, or a repository URL found where `open` would
-find it — never cloned here: `new` says to `we open` it instead. With two
-arguments the first is always the repository. One argument that is not a URL
+find it — and cloned the way `open` clones it when it is not there,
+`trust_clones` included ([issue
+#47](https://github.com/axklim/workenv/issues/47)). With two arguments the
+first is always the repository. A bare name there that is none of these is
+cloned from `<default_owner>/<name>` when the config sets `default_owner`;
+without it, the error says to pass the repository URL. Only the explicit
+two-argument form clones a bare name: alone, it stays a branch in the cwd's
+repository. A repository in `no_workers` is refused before any clone. A
+failed clone — a typo in the name, say — is `we: <owner>/<name> is not in
+<projects_path> and could not be cloned: …`, after `gh`'s own error. One argument that is not a URL
 is a repository when it is one *and* not the cwd's own repository; otherwise
 it is a branch name in the cwd's repository, and outside any repository that
 is an error. So `we new trade` from inside `trade` is branch `trade`, and a
@@ -393,7 +401,8 @@ environment on it.
 
 Before the usual `open` output, `new` prints the reading it took, one line
 each: `target: <owner>/<repo>#<n>` for a URL, else `repo: <name> (<how>)`
-with *how* one of `cwd`, `alias <a>`, `projects_path`, `path`; then
+with *how* one of `cwd`, `alias <a>`, `projects_path`, `path`, `cloned
+<owner>/<repo>`; then
 `branch: <name> (given)` or `branch: feature-N (next free)`. Then it is
 `open`: same session flags and creation overrides (`--branch` and `--repo`
 are its arguments), same find-or-create, same output including
@@ -609,7 +618,9 @@ claude_cmd    = "claude"       # command run in the first tmux window,
 remote_control = false         # also append --remote-control <session>;
                                # `we open --rc` does it for one open
 trust_clones  = false          # pre-accept claude's trust dialog for a
-                               # repository open clones; see Placement
+                               # repository open or new clones; see Placement
+default_owner = ""             # GitHub owner `we new <name> <branch>` clones
+                               # a bare name from when it is not on disk
 remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go; see Placement for variables and filters
@@ -656,8 +667,9 @@ runner, asserting exact argv and the persisted registry:
   `--dry-run`, failing without `gh` before touching anything, and `ls` marking `done`
   and staying usable without `gh`; a clone trusted in claude's config before
   its session starts, only with `trust_clones`, only for a clone, and a
-  config that cannot be parsed reported rather than failing `open`; `new`'s
-  reading of every argument form, `feature-N` skipping local, origin and
+  config that cannot be parsed reported rather than failing `open` or `new`;
+  `new`'s reading of every argument form, its clone of a missing repository
+  URL or a `default_owner` bare name — and of nothing else — `feature-N` skipping local, origin and
   registry branches, a name never read as an id, and its errors; the
   `no_workers` refusal by name and alias, for `new` and a creating `open`,
   and an existing environment there still opening; `delete` of the current

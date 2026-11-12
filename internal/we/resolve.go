@@ -370,8 +370,14 @@ func (e *Env) repoForTarget(t target.Target, attachOnly bool) (string, error) {
 	if attachOnly {
 		return "", notFound(t.String())
 	}
-	dest := filepath.Join(e.Cfg.ProjectsPath, t.Repo)
-	if err := e.git().Clone(t.Owner+"/"+t.Repo, dest); err != nil {
+	return e.clone(t.Owner, t.Repo)
+}
+
+// clone makes a normal clone of owner/repo at <projects_path>/<repo> and,
+// with trust_clones, marks it trusted for claude.
+func (e *Env) clone(owner, repo string) (string, error) {
+	dest := filepath.Join(e.Cfg.ProjectsPath, repo)
+	if err := e.git().Clone(owner+"/"+repo, dest); err != nil {
 		return "", err
 	}
 	if e.Cfg.TrustClones {
