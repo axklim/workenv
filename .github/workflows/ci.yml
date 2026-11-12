@@ -49,6 +49,8 @@ jobs:
           TAP="$(brew --repository)/Library/Taps/local/homebrew-citap"
           mkdir -p "$TAP/Formula"
           make formula VERSION=9.9.9 > "$TAP/Formula/workenv.rb"
+          # Homebrew refuses to load a formula from a tap nobody trusted.
+          brew trust --formula local/citap/workenv
           brew style "$TAP/Formula/workenv.rb"
 
           # The check that matters, and the one whose absence shipped a
