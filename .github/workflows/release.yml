@@ -101,6 +101,8 @@ jobs:
           TAP="$(brew --repository)/Library/Taps/local/homebrew-pretap"
           rm -rf "$TAP"; mkdir -p "$TAP/Formula"
           make formula VERSION="$V" > "$TAP/Formula/workenv.rb"
+          # Homebrew refuses to load a formula from a tap nobody trusted.
+          brew trust --formula local/pretap/workenv
           brew style "$TAP/Formula/workenv.rb"
           brew audit --strict --formula local/pretap/workenv
 
