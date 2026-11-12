@@ -95,7 +95,7 @@ type newCmd struct {
 	Session    string `long:"session" value-name:"NAME" description:"tmux session name (creation only)"`
 	Wt         string `long:"wt" value-name:"PATH|NAME" description:"worktree location (creation only)"`
 	Args       struct {
-		What string `positional-arg-name:"repo|issue-url|name" required:"yes" description:"repository (alias, name in projects_path, path or .), issue or PR URL, or a branch name in the cwd's repository"`
+		What string `positional-arg-name:"repo|issue-url|name" required:"yes" description:"repository (alias, name in projects_path, path, . or URL; a missing one is cloned), issue or PR URL, or a branch name in the cwd's repository"`
 		Name string `positional-arg-name:"name" description:"branch name; feature-N, the next free one, when omitted"`
 	} `positional-args:"yes"`
 }
@@ -166,10 +166,13 @@ ignored there.
 we new <repo|issue-url|name> [name] opens a fresh branch from a sentence:
   we new <issue URL> [name]  as open <issue URL>; a name is its --branch
   we new <repo> <name>       branch <name> in repo: an alias, a name in
-                             projects_path, a path, or . for the cwd's
+                             projects_path, a path, . for the cwd's, or a
+                             repository URL, cloned when it is not there
   we new <repo>              branch feature-N, the smallest N free there
   we new <name>              branch <name> in the cwd's repository
 A lone argument is a repository only when it is one and not the cwd's own.
+With default_owner set, <repo> <name> clones a bare repo name that is not
+in projects_path from <default_owner>/<repo>; a lone name never clones.
 new prints the reading it took (repo:, branch:) before open's output, then
 finds or creates like open. we open <alias> stays the project home.
 
@@ -227,8 +230,10 @@ Config (XDG): ~/.config/workenv/config.toml
                                  with --name <session> appended
   remote_control = false         also append --remote-control <session>;
                                  --rc does it for one open
-  trust_clones  = false          mark a repository open clones as trusted,
-                                 so claude skips its trust dialog there
+  trust_clones  = false          mark a repository open or new clones as
+                                 trusted, so claude skips its trust dialog
+  default_owner = ""             GitHub owner we new <name> <branch> clones
+                                 a bare name from when it is not on disk
   remote_we     = "we"           we binary path on remote hosts
   [aliases]                      short repository names, last in the file:
   infra = "simple-dimple-infra"  --repo infra, we open infra, and session

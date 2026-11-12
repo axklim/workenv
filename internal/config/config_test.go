@@ -4,6 +4,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"workenv/internal/wtpath"
@@ -45,6 +46,7 @@ claude_cmd = "claude --dangerously-skip-permissions"
 remote_we = "/usr/local/bin/we"
 remote_control = true
 trust_clones = true
+default_owner = "axklim"
 `
 	cfg, err := parse(raw, home)
 	if err != nil {
@@ -67,6 +69,20 @@ trust_clones = true
 	}
 	if !cfg.TrustClones {
 		t.Error("TrustClones = false, want true")
+	}
+	if cfg.DefaultOwner != "axklim" {
+		t.Errorf("DefaultOwner = %q, want axklim", cfg.DefaultOwner)
+	}
+}
+
+func TestParseRejectsBadDefaultOwner(t *testing.T) {
+	if cfg, err := parse(`default_owner = ""`, "/home/u"); err != nil || cfg.DefaultOwner != "" {
+		t.Errorf(`parse(default_owner = "") = %q, %v; want unset`, cfg.DefaultOwner, err)
+	}
+	for _, raw := range []string{`default_owner = "axklim/workenv"`, `default_owner = "a b"`} {
+		if _, err := parse(raw, "/home/u"); err == nil || !strings.Contains(err.Error(), "default_owner") {
+			t.Errorf("parse(%q) error = %v, want a default_owner error", raw, err)
+		}
 	}
 }
 

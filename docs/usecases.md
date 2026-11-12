@@ -136,6 +136,29 @@ inside `trade` makes branch `trade`. `we open infra` still means the project
 home on `main`. Running the same `we new infra review` again finds the
 environment instead of making another.
 
+### A fresh branch in a repository that is not cloned yet
+
+```
+we new https://github.com/axklim/trade review   # clones trade, then branch review
+we new trade review                             # the same, with default_owner = "axklim"
+```
+
+```
+repo: trade (cloned axklim/trade)
+branch: review (given)
+created environment 13
+...
+```
+
+A repository URL that is not in `projects_path` is cloned there, as `open`
+would clone it, and `trust_clones` applies. With `default_owner` set, a bare
+name followed by a branch clones `<default_owner>/<name>` the same way;
+without it, `we new trade review` fails with `repository "trade" not found`
+and a hint to pass the URL. A bare name on its own (`we new trade`) is still
+a branch in the repository you are standing in, and never clones. A typo
+fails the clone: `gh` prints why, then `we: axklim/tarde is not in
+~/projects and could not be cloned`.
+
 ### A repository that takes no work environments
 
 ```toml
@@ -328,14 +351,14 @@ at once if it runs Remote Control, and times out if it does not.
 trust_clones = true
 ```
 
-A repository `open` has just cloned is new to `claude`, which would start on
+A repository `open` or `new` has just cloned is new to `claude`, which would start on
 its "Is this a project you trust?" dialog and wait — no Remote Control and
-no `--prompt` until someone answers it. With `trust_clones = true`, `open`
+no `--prompt` until someone answers it. With `trust_clones = true`, `we`
 records the answer in `~/.claude.json` for the clone before the session
 starts, and every later worktree of that repository shares it. Only a clone
-`open` made itself is trusted; an answer already in the file, yes or no, is
+`we` made itself is trusted; an answer already in the file, yes or no, is
 kept. It is off by default, since it answers a safety prompt for you. If
-`~/.claude.json` cannot be read, `open` says so on stderr and carries on.
+`~/.claude.json` cannot be read, `we` says so on stderr and carries on.
 
 ## Handing work to a new session
 

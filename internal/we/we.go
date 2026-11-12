@@ -52,15 +52,15 @@ type Env struct {
 	// StatePath is the JSON registry of work environments.
 	StatePath string
 	// ClaudeConfig is claude's global config file (claudecfg.Path), where
-	// a repository open clones is marked trusted when Cfg.TrustClones.
+	// a repository open or new clones is marked trusted when Cfg.TrustClones.
 	ClaudeConfig string
 
 	// RCTimeout is how long RemoteControlURL waits for Remote Control to
 	// come up, polling every RCInterval.
 	RCTimeout, RCInterval time.Duration
 
-	// trustErr is why the repository this Open cloned could not be marked
-	// trusted; it is reported back, not fatal (OpenResult.TrustErr).
+	// trustErr is why the repository this Open or New cloned could not be
+	// marked trusted; it is reported back, not fatal (OpenResult.TrustErr).
 	trustErr error
 }
 
@@ -148,13 +148,13 @@ func (e *Env) github() gh.Client { return gh.Client{R: e.R} }
 // opts.AttachOnly — repairs its worktree and tmux session, saves the
 // registry and surfaces the session in a terminal.
 func (e *Env) Open(opts OpenOptions) (OpenResult, error) {
+	e.trustErr = nil
 	return e.open(opts, func(st *state.Store) (*state.Env, bool, error) { return e.resolve(st, opts) })
 }
 
 // open is Open with the resolution step given: everything after it —
 // repair, recording the launch flags, saving, the terminal — is shared.
 func (e *Env) open(opts OpenOptions, resolve func(*state.Store) (*state.Env, bool, error)) (OpenResult, error) {
-	e.trustErr = nil
 	st, err := state.Load(e.StatePath)
 	if err != nil {
 		return OpenResult{}, err

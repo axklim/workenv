@@ -113,8 +113,10 @@ environment whose session died while claude was still running in it.
 `we new` is `open` for a fresh branch: `we new infra review` is branch
 `review` in the repository aliased `infra`, `we new infra` the next free
 `feature-N` there, `we new review` branch `review` in the repository you are
-in, and `we new <issue URL>` the same as `we open` on it. It prints how it
-read its arguments (`repo: …`, `branch: …`) before `open`'s output. With
+in, and `we new <issue URL>` the same as `we open` on it. A repository URL
+that is not cloned yet is cloned first, and so is `we new <name> <branch>`
+for a bare name when `default_owner` is set. It prints how it read its
+arguments (`repo: …`, `branch: …`) before `open`'s output. With
 `--rc`, `open` and `new` wait for Remote Control and end with
 `rc: <url>`, or `rc: timeout` and a non-zero exit after 2 minutes.
 
@@ -157,9 +159,12 @@ claude_cmd    = "claude"       # command run in the first tmux window,
                                # with --name <session> appended
 remote_control = false         # also append --remote-control <session>;
                                # `we open --rc` does it for one open
-trust_clones  = false          # mark a repository open clones as trusted
-                               # in ~/.claude.json, so claude does not
-                               # stop on its trust dialog there
+trust_clones  = false          # mark a repository open or new clones as
+                               # trusted in ~/.claude.json, so claude does
+                               # not stop on its trust dialog there
+default_owner = ""             # GitHub owner `we new <name> <branch>`
+                               # clones a bare name from when it is not
+                               # in projects_path
 remote_we     = "we"           # we binary path on remote hosts
 
 # where new worktrees go — a Go text/template; variables and filters are
@@ -187,7 +192,7 @@ branch is adopted rather than duplicated.
 Three skills give any Claude Code session — one `we` opened included — slash
 commands to start and remove work environments of its own:
 
-- `/workenv:open <repo | alias | issue URL | .> [name]` runs `we new …
+- `/workenv:open <repo | alias | repo URL | issue URL | .> [name]` runs `we new …
   --no-terminal --rc` and reports the session and its Remote Control link; it
   also teaches a session the rest of `we` (targets, flags, reading `we ls`).
 - `/workenv:close [target]` runs `we delete --delete-branch`, the current

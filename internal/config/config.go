@@ -28,8 +28,11 @@ type Config struct {
 	// RemoteControl also starts claude with --remote-control <session>.
 	RemoteControl bool
 	// TrustClones pre-accepts claude's trust dialog for a repository open
-	// clones.
+	// or new clones.
 	TrustClones bool
+	// DefaultOwner is the GitHub owner `we new <name> <branch>` clones a
+	// bare repository name from when it is not in ProjectsPath.
+	DefaultOwner string
 	// Aliases maps a short name to a repository name in ProjectsPath; the
 	// alias is the project name of every environment created in it.
 	Aliases map[string]string
@@ -138,6 +141,11 @@ func parse(raw, home string) (Config, error) {
 			cfg.ClaudeCmd = val
 		case "remote_we":
 			cfg.RemoteWe = val
+		case "default_owner":
+			if strings.ContainsAny(val, "/\\ ") {
+				return Config{}, fmt.Errorf("config line %d: default_owner %q must be a GitHub user or organization", i+1, val)
+			}
+			cfg.DefaultOwner = val
 		case "remote_control", "trust_clones":
 			b, err := parseBool(val)
 			if err != nil {

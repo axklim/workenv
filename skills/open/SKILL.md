@@ -1,7 +1,7 @@
 ---
 name: open
-description: Use when asked to open, start, run, list, attach to, show or tear down a work environment or claude session for a project, GitHub issue, PR or branch with the `we` (workenv) CLI, including dispatching a task to a new session or making one reachable from another device. Invoked as /workenv:open <repo | alias | issue URL | .> [name] it starts a worker session and reports its Remote Control link.
-argument-hint: <repo | alias | issue URL | .> [name]
+description: Use when asked to open, start, run, list, attach to, show or tear down a work environment or claude session for a project, GitHub issue, PR or branch with the `we` (workenv) CLI, including dispatching a task to a new session or making one reachable from another device. Invoked as /workenv:open <repo | alias | repo URL | issue URL | .> [name] it starts a worker session and reports its Remote Control link.
+argument-hint: <repo | alias | repo URL | issue URL | .> [name]
 ---
 
 # Driving `we`
@@ -14,7 +14,7 @@ branch, from a repository and maybe a name. Every other command takes the same
 `<target>` (id, session name, branch, issue, PR or repository URL, plain name).
 `we <command> --help` has the flags; this is the judgment the help cannot make.
 
-## `/workenv:open <repo | alias | issue URL | .> [name]`
+## `/workenv:open <repo | alias | repo URL | issue URL | .> [name]`
 
 Run exactly this, with the arguments as given:
 
@@ -42,6 +42,7 @@ Do not pick a branch, add `--repo`, or rephrase the arguments.
 | "a session for infra, name it review" | `we new infra review` |
 | "a new session in infra" (no name) | `we new infra` (branch `feature-N`) |
 | "a new branch here" | `we new .` or `we new <name>` |
+| "a session in OWNER/tool, not cloned yet, name it spike" | `we new https://github.com/OWNER/tool spike` |
 | "pick up PR 61" | `we open https://github.com/OWNER/trade/pull/61` |
 | "open the infra project" (its home, on `main`) | `we open infra` or `we open https://github.com/OWNER/infra` |
 | "back to environment 7 / session infra-review" | `we attach 7`, `we attach infra-review` (`open` works too) |
@@ -53,8 +54,11 @@ Do not pick a branch, add `--repo`, or rephrase the arguments.
 Add `--no-terminal` to every `new`, `open` and `attach` run for someone else.
 
 `we new <repo> <name>`: the repository is an alias, a directory in
-`projects_path`, a path, or `.` for the cwd's; a URL of a repository already on
-disk works too. One argument that is a repository other than the cwd's own
+`projects_path`, a path, `.` for the cwd's, or a repository URL — cloned into
+`projects_path` first when it is not there (the reading says `cloned`). A
+bare name that is none of these is cloned from `default_owner` when the
+config sets it; without it, pass the URL. A typo then fails as a clone. One
+argument that is a repository other than the cwd's own
 means a fresh `feature-N` there; anything else is a branch in the cwd's
 repository. A name is the **branch**; the session is then `<project>-<branch>`
 (sanitized: anything outside `[A-Za-z0-9_-]` becomes `-`), so `review` in
@@ -124,9 +128,9 @@ it was offline.
 **Versions.** `--rc`, `--prompt`, `remote_control`, `ls --json`, the claude
 state in `ls`, `gc` and `[aliases]` arrived in 0.2.0; `--model` and
 `--effort` arrived in 0.2.4; recorded launch flags, `--continue` on a
-recreated session and the `interrupted` state arrive after 0.2.4; `we new`,
-`[no_workers]`, `delete` without a target and the `rc:` line arrive after
-that. `we version` says which you have, `we new --help` whether it has `new`.
+recreated session, the `interrupted` state, `we new`, `[no_workers]`,
+`delete` without a target and the `rc:` line arrived in 0.3.0; `we new`
+cloning a missing repository and `default_owner` arrive after 0.4.0. `we version` says which you have, `we new --help` whether it has `new`.
 
 ## Reading back
 
@@ -175,7 +179,8 @@ repositories live and get cloned, `~/projects`); `claude_cmd` (first-window
 command, `claude` — `we` appends `--name <session>`, plus `--remote-control
 <session>` when Remote Control is on, unless the command passes them itself);
 `remote_control` (`false`); `trust_clones` (`false`; answers claude's trust
-dialog for a repository `open` clones); `worktree_path` (template for new
+dialog for a repository `open` or `new` clones); `default_owner` (GitHub
+owner `we new <name> <branch>` clones a bare name from); `worktree_path` (template for new
 worktree locations); `remote_we` (path of `we` on `--host` machines);
 `[aliases]` and `[no_workers]` tables.
 
