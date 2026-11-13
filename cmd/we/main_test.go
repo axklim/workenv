@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"workenv/internal/config"
 	"workenv/internal/execx"
@@ -101,7 +102,7 @@ func TestRunOpenRCTimeout(t *testing.T) {
 	fake := &execx.Fake{Responses: []execx.FakeResponse{
 		{Prefix: "git symbolic-ref --short -q HEAD", Out: "x"},
 		{Prefix: "tmux show-options", Out: "@workenv 1"},
-		{Prefix: "tmux capture-pane", Out: "Is this a project you trust?"},
+		{Prefix: "tmux capture-pane", Out: "claude\n> "},
 	}}
 	env := &we.Env{Cfg: config.Config{ClaudeCmd: "claude"}, R: fake, StatePath: statePath, Cwd: root}
 	opts, _ := parse(t, "open", "1", "--rc", "--no-terminal")
@@ -113,8 +114,46 @@ func TestRunOpenRCTimeout(t *testing.T) {
 	if !strings.HasSuffix(out, "\nrc: timeout\n") {
 		t.Errorf("rc: timeout must be the last line:\n%s", out)
 	}
-	if got := lastLines("a\n\n  \nb\nc\n", 2); !slices.Equal(got, []string{"b", "c"}) {
-		t.Errorf("lastLines = %q", got)
+	if got := we.LastLines("a\n\n  \nb\nc\n", 2); !slices.Equal(got, []string{"b", "c"}) {
+		t.Errorf("LastLines = %q", got)
+	}
+}
+
+// TestRunOpenRCTrustDialog: claude stopped on its trust dialog is
+// rc: trust-dialog as the last line and ErrTrustDialog, without waiting
+// out the timeout.
+func TestRunOpenRCTrustDialog(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, "envs.json")
+	st := &state.Store{Path: statePath}
+	st.Add(&state.Env{Project: "proj", Branch: "x", TmuxSession: "proj-x", WorktreePath: root, RepoPath: root})
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	fake := &execx.Fake{Responses: []execx.FakeResponse{
+		{Prefix: "git symbolic-ref --short -q HEAD", Out: "x"},
+		{Prefix: "tmux show-options", Out: "@workenv 1"},
+		{Prefix: "tmux capture-pane", Out: " ❯ No, exit\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel\n"},
+	}}
+	env := &we.Env{Cfg: config.Config{ClaudeCmd: "claude"}, R: fake, StatePath: statePath, Cwd: root,
+		RCTimeout: time.Minute, RCInterval: time.Millisecond}
+	opts, _ := parse(t, "open", "1", "--rc", "--no-terminal")
+	var err error
+	out := captureStdout(t, func() { err = runOpen(env, "open", opts.Open, false) })
+	if !errors.Is(err, we.ErrTrustDialog) {
+		t.Errorf("err = %v, want ErrTrustDialog", err)
+	}
+	if !strings.HasSuffix(out, "\nrc: trust-dialog\n") {
+		t.Errorf("rc: trust-dialog must be the last line:\n%s", out)
+	}
+	captures := 0
+	for _, c := range fake.Joined() {
+		if strings.HasPrefix(c, "tmux capture-pane") {
+			captures++
+		}
+	}
+	if captures != 1 {
+		t.Errorf("captured the pane %d times, want 1", captures)
 	}
 }
 

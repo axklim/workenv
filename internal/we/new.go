@@ -209,13 +209,27 @@ const rcActive = "/remote-control is active"
 
 var rcURL = regexp.MustCompile(`https://claude\.ai/code/session_[A-Za-z0-9]+`)
 
+// trustDialog is the confirm button of claude's "Is this a project you
+// created or one you trust?" dialog, Claude Code's text like rcActive. It is
+// looked for only among the screen's last rcTailLines lines, where a waiting
+// dialog sits, so an answered one left in the history does not count.
+const (
+	trustDialog = "Yes, I trust this folder"
+	rcTailLines = 8
+)
+
 // ErrRCTimeout is RemoteControlURL giving up.
 var ErrRCTimeout = errors.New("Remote Control did not come up")
 
+// ErrTrustDialog is RemoteControlURL finding claude stopped on its trust
+// dialog, which nothing in we answers for a repository it did not clone.
+var ErrTrustDialog = errors.New("claude is waiting on its trust dialog")
+
 // RemoteControlURL waits up to RCTimeout for Remote Control to come up in
 // session's first pane and returns its link. The pane's history is read,
-// so a session that is already up answers at once. On timeout it returns
-// ErrRCTimeout and the last screen it read.
+// so a session that is already up answers at once. It returns
+// ErrTrustDialog as soon as the pane shows claude's trust dialog, and
+// ErrRCTimeout on timeout, each with the last screen it read.
 func (e *Env) RemoteControlURL(session string) (url, screen string, err error) {
 	deadline := time.Now().Add(e.RCTimeout)
 	for {
@@ -224,12 +238,26 @@ func (e *Env) RemoteControlURL(session string) (url, screen string, err error) {
 			if url := findRCURL(out); url != "" {
 				return url, screen, nil
 			}
+			if onTrustDialog(out) {
+				return "", screen, fmt.Errorf("%w in session %s: answer it there (we attach %s) or run claude in the repository once; "+
+					"a repository we clones itself skips it with trust_clones = true", ErrTrustDialog, session, session)
+			}
 		}
 		if !time.Now().Before(deadline) {
 			return "", screen, fmt.Errorf("%w in session %s within %s", ErrRCTimeout, session, e.RCTimeout)
 		}
 		time.Sleep(e.RCInterval)
 	}
+}
+
+// onTrustDialog reports whether screen's last lines show the trust dialog.
+func onTrustDialog(screen string) bool {
+	for _, line := range LastLines(screen, rcTailLines) {
+		if strings.Contains(line, trustDialog) {
+			return true
+		}
+	}
+	return false
 }
 
 // findRCURL is the link on, or right after, the last rcActive line.
@@ -249,4 +277,18 @@ func findRCURL(screen string) string {
 		}
 	}
 	return url
+}
+
+// LastLines is the last n non-blank lines of screen.
+func LastLines(screen string, n int) []string {
+	var lines []string
+	for _, line := range strings.Split(screen, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
 }
