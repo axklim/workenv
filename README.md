@@ -118,7 +118,8 @@ that is not cloned yet is cloned first, and so is `we new <name> <branch>`
 for a bare name when `default_owner` is set. It prints how it read its
 arguments (`repo: …`, `branch: …`) before `open`'s output. With
 `--rc`, `open` and `new` wait for Remote Control and end with
-`rc: <url>`, or `rc: timeout` and a non-zero exit after 2 minutes.
+`rc: <url>`, or `rc: timeout` and a non-zero exit after 2 minutes —
+`rc: trust-dialog` at once when claude stops on its trust dialog.
 
 `--repo <name|path>` names the repository a **plain-name** target belongs to,
 for when you're not standing in it: a bare name is an alias or is looked up

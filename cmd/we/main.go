@@ -189,7 +189,9 @@ override the same flag in claude_cmd.
 
 --rc on open and new also waits for Remote Control to come up in the
 session and prints rc: <url> as the last line; after 2 minutes without it,
-rc: timeout, the last screen lines on stderr, and a non-zero exit.
+rc: timeout, the last screen lines on stderr, and a non-zero exit. When
+claude stops on its trust dialog instead, rc: trust-dialog at once, the
+way past it on stderr, and a non-zero exit.
 
 --rc, --model and --effort are recorded with the environment and apply
 again whenever open or attach recreates its session, after a reboot say;
@@ -441,33 +443,23 @@ func runNew(env *we.Env, c newCmd) error {
 }
 
 // printRCURL waits for Remote Control in session and prints `rc: <url>` —
-// or `rc: timeout`, with the last lines of the screen on stderr, and an
-// error.
+// or, with an error, `rc: trust-dialog` when claude stopped on its trust
+// dialog, or `rc: timeout` with the last lines of the screen on stderr.
 func printRCURL(env *we.Env, session string) error {
 	url, screen, err := env.RemoteControlURL(session)
-	if err != nil {
+	switch {
+	case errors.Is(err, we.ErrTrustDialog):
+		fmt.Println("rc: trust-dialog")
+		return err
+	case err != nil:
 		fmt.Println("rc: timeout")
-		for _, line := range lastLines(screen, 8) {
+		for _, line := range we.LastLines(screen, 8) {
 			fmt.Fprintln(os.Stderr, line)
 		}
 		return err
 	}
 	fmt.Println("rc: " + url)
 	return nil
-}
-
-// lastLines is the last n non-blank lines of screen.
-func lastLines(screen string, n int) []string {
-	var lines []string
-	for _, line := range strings.Split(screen, "\n") {
-		if strings.TrimSpace(line) != "" {
-			lines = append(lines, line)
-		}
-	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return lines
 }
 
 // printOpenResult prints the human summary, then the machine-readable

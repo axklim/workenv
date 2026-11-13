@@ -340,9 +340,12 @@ rc: https://claude.ai/code/session_01AbC…
 ```
 
 That link is what to hand the person on the other device. If it does not
-come within 2 minutes — the trust dialog of a fresh clone without
-`trust_clones`, say — the last line is `rc: timeout`, the last screen lines go
-to stderr, and the exit is non-zero. A session that is already running answers
+come within 2 minutes, the last line is `rc: timeout`, the last screen lines go
+to stderr, and the exit is non-zero. If claude stops on its "Is this a project
+you trust?" dialog — a repository never opened in claude, or a fresh clone
+without `trust_clones` — `we` does not wait: the last line is
+`rc: trust-dialog`, stderr says how to get past it (answer it in the session,
+or run `claude` in the repository once), and the exit is non-zero. A session that is already running answers
 at once if it runs Remote Control, and times out if it does not.
 
 ## Skipping claude's trust dialog in a fresh clone

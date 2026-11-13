@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"workenv/internal/execx"
 	"workenv/internal/state"
@@ -540,9 +541,62 @@ func TestRemoteControlURL(t *testing.T) {
 		t.Errorf("RemoteControlURL = %q, %v", got, err)
 	}
 
-	fake.Responses = []execx.FakeResponse{{Prefix: "tmux capture-pane", Out: "Is this a project you trust?"}}
+	fake.Responses = []execx.FakeResponse{{Prefix: "tmux capture-pane", Out: "claude\n> "}}
 	_, screen, err := env.RemoteControlURL("proj-x")
-	if !errors.Is(err, ErrRCTimeout) || screen != "Is this a project you trust?" {
+	if !errors.Is(err, ErrRCTimeout) || screen != "claude\n> " {
 		t.Errorf("timeout = %q, %v", screen, err)
+	}
+}
+
+// trustScreen is the trust dialog as tmux captured it from Claude Code
+// 2.1.323, the cursor on its default answer.
+const trustScreen = `$ claude --name proj-x --remote-control proj-x
+────────────────────────────────────────
+ Accessing workspace:
+
+ /home/u/projects/proj
+
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source
+ project, or work from your team). If not, take a moment to review what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel
+
+
+`
+
+// TestRemoteControlURLTrustDialog: the dialog on screen ends the wait at
+// the first capture with ErrTrustDialog and a way out; one answered and
+// scrolled past by claude's own screen does not.
+func TestRemoteControlURLTrustDialog(t *testing.T) {
+	fake := &execx.Fake{Responses: []execx.FakeResponse{{Prefix: "tmux capture-pane -p -J -S - -t proj-x", Out: trustScreen}}}
+	env, _ := newTestEnv(t, fake)
+	env.RCTimeout, env.RCInterval = time.Minute, time.Millisecond
+	_, screen, err := env.RemoteControlURL("proj-x")
+	if !errors.Is(err, ErrTrustDialog) || screen != trustScreen {
+		t.Fatalf("RemoteControlURL = %q, %v; want ErrTrustDialog", screen, err)
+	}
+	for _, want := range []string{"session proj-x", "we attach proj-x", "trust_clones = true"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	if got := fake.Joined(); !slices.Equal(got, []string{"tmux capture-pane -p -J -S - -t proj-x"}) {
+		t.Errorf("must stop at the first capture, calls:\n%s", strings.Join(got, "\n"))
+	}
+
+	answered := trustScreen + "\n ✻ Welcome to Claude Code\n\n  /help for help\n  cwd: /home/u/projects/proj\n" +
+		"────\n> \n────\n  ? for shortcuts\n  /remote-control connecting…\n"
+	fake.Calls = nil
+	fake.Responses = []execx.FakeResponse{{Prefix: "tmux capture-pane", Out: answered}}
+	env.RCTimeout = 0
+	if _, _, err := env.RemoteControlURL("proj-x"); !errors.Is(err, ErrRCTimeout) {
+		t.Errorf("an answered dialog in the history: err = %v, want ErrRCTimeout", err)
 	}
 }

@@ -474,7 +474,15 @@ line and the `https://claude.ai/code/session_…` link on it or the line after.
 After 2 minutes without one they print `rc: timeout`, the last 8 non-blank
 screen lines on stderr, and exit non-zero. This also applies to a live
 session: one that was not started with Remote Control times out. Nothing
-answers dialogs on the way; with `trust_clones = true` none stands in it.
+answers dialogs on the way. The trust dialog (*Trusting a clone*) would only
+run out the clock, so a capture whose last 8 non-blank lines hold its
+`Yes, I trust this folder` button ends the wait at once: `rc: trust-dialog`
+as the last line, an error on stderr naming the session and the ways out
+(answer it there, run claude in the repository once, or `trust_clones` for a
+clone `we` makes), and a non-zero exit. The session is left on the dialog.
+Only the tail counts, so a dialog answered and scrolled past in the history
+does not stop the wait. With `trust_clones = true` a clone `we` made never
+shows it.
 
 **Initial prompt.** `we open --prompt "<text>"` hands claude its first
 prompt, so a session started for another agent starts working at once. Like
@@ -675,7 +683,9 @@ runner, asserting exact argv and the persisted registry:
   and an existing environment there still opening; `delete` of the current
   (innermost) environment and its error outside one; the session killed
   after the record is saved, by `delete` and `gc`; the Remote Control link
-  read from the pane, and the timeout returning the last screen.
+  read from the pane, the timeout returning the last screen, and the trust
+  dialog ending the wait at the first capture unless it is only in the
+  history.
 - **claudecfg** — the config path, adding the trust key to a missing, empty
   or populated file with every other value kept, leaving an existing answer
   alone, refusing a malformed file without rewriting it, and a symlinked file.
@@ -689,7 +699,7 @@ runner, asserting exact argv and the persisted registry:
 - **cmd** — listing layout, TTY vs piped rendering, `show`, the `--json`
   keys and the empty array, the `done` and `interrupted` states, `gc` output and `--host`;
   `new`'s flags and reading printed first, `rc:` as the last line or
-  `rc: timeout` with an error, `new` and target-less `delete` over `--host`.
+  `rc: timeout` or `rc: trust-dialog` with an error, `new` and target-less `delete` over `--host`.
 
 ## Use cases
 

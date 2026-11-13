@@ -29,7 +29,9 @@ Do not pick a branch, add `--repo`, or rephrase the arguments.
 
 - No arguments: ask what to open; do not guess.
 - Non-zero exit: report its stderr as is. `rc: timeout` comes with the last
-  screen lines on stderr; report them. A `takes no work environments` refusal
+  screen lines on stderr; report them. `rc: trust-dialog` means claude waits
+  on "Is this a project you trust?" in that session: say so and pass on the
+  way out from stderr; do not answer the dialog yourself. A `takes no work environments` refusal
   is final, its hint says what to use instead.
 - The reading lines `we new` prints first (`repo: …`, `branch: …`) are there
   if the caller asks why; do not repeat them unasked.
@@ -95,7 +97,8 @@ stderr which flags it ignored. `attach` does not accept them. `--rc`,
   those.
 - `--rc` — start claude with Remote Control named after the session, so a
   phone or laptop can pick it up, then wait for it and print `rc: <url>` as
-  the last line (`rc: timeout` and a non-zero exit after 2 minutes). A
+  the last line (`rc: timeout` and a non-zero exit after 2 minutes,
+  `rc: trust-dialog` at once if claude stops on its trust dialog). A
   running session answers at once if it has Remote Control, else times out.
   `remote_control = true` in the config starts every session with it, but
   only `--rc` prints the link.
