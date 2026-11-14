@@ -232,6 +232,9 @@ Config (XDG): ~/.config/workenv/config.toml
                                  with --name <session> appended
   remote_control = false         also append --remote-control <session>;
                                  --rc does it for one open
+  remote_control_name = ""       name for --remote-control instead of the
+                                 session, from {id} and {session}, e.g.
+                                 "w{id}: {session}"
   trust_clones  = false          mark a repository open or new clones as
                                  trusted, so claude skips its trust dialog
   default_owner = ""             GitHub owner we new <name> <branch> clones

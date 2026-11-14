@@ -331,6 +331,11 @@ when the session is started, so a live one is left as it is. The environment
 remembers `--rc`, so its session comes back with Remote Control after a
 reboot.
 
+To see the environment's id in the Remote Control list, set
+`remote_control_name = "w{id}: {session}"`: the session above then shows as
+`w7: trade-review-claude-md-file`. Only the Remote Control name changes; the
+tmux session and `--name` stay the session name.
+
 With `--rc`, `open` (and `new`) wait for Remote Control to come up and end
 with its link:
 

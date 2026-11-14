@@ -960,6 +960,38 @@ func TestOpenStartsClaudeWithRemoteControl(t *testing.T) {
 // TestOpenStartsClaudeWithPrompt covers issue #17: --prompt reaches claude
 // as its first, positional prompt when repair starts the session. The text
 // is shell-quoted, so a quote in it cannot end the word early.
+// TestOpenRemoteControlName covers issue #51: with remote_control_name
+// set, a session recreated after a restart, by --rc or remote_control,
+// gets the rendered name for Remote Control; --name and the tmux session
+// keep the session name.
+func TestOpenRemoteControlName(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config bool
+		flag   bool
+	}{
+		{"config", true, false},
+		{"flag", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession}}
+			env, repo := newTestEnv(t, fake)
+			env.Cfg.RemoteControl = tc.config
+			env.Cfg.RemoteControlName = "w{id}: {session}"
+			gone := filepath.Join(env.Cwd, "gone")
+			seed(t, env, &state.Env{Project: "proj", Branch: "feature-123", TmuxSession: "proj-feature-123", WorktreePath: gone, RepoPath: repo})
+
+			if _, err := env.Open(OpenOptions{Target: name("proj-feature-123"), NoTerminal: true, RemoteControl: tc.flag}); err != nil {
+				t.Fatalf("Open error: %v", err)
+			}
+			want := startLine(env, "proj-feature-123", 1, resumed("claude --name proj-feature-123 --remote-control 'w1: proj-feature-123'"))
+			if !slices.Contains(fake.Joined(), want) {
+				t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+			}
+		})
+	}
+}
+
 func TestOpenStartsClaudeWithPrompt(t *testing.T) {
 	fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession}}
 	env, repo := newTestEnv(t, fake)
@@ -1068,6 +1100,26 @@ func TestClaudeCommand(t *testing.T) {
 		l := launch{RemoteControl: tc.rc, Model: tc.model, Effort: tc.effort, Prompt: tc.prompt}
 		if got := claudeCommand(tc.cmd, tc.session, l); got != tc.want {
 			t.Errorf("claudeCommand(%q, %q, %+v) = %q, want %q", tc.cmd, tc.session, l, got, tc.want)
+		}
+	}
+}
+
+// TestClaudeCommandRemoteControlName: a rendered remote_control_name
+// replaces the session in --remote-control only, shell-quoted, and is
+// unused while Remote Control is off or claude_cmd passes its own.
+func TestClaudeCommandRemoteControlName(t *testing.T) {
+	for _, tc := range []struct {
+		cmd  string
+		rc   bool
+		want string
+	}{
+		{"claude", true, "claude --name proj-feature --remote-control 'w7: proj-feature'"},
+		{"claude", false, "claude --name proj-feature"},
+		{"claude --remote-control mine", true, "claude --remote-control mine --name proj-feature"},
+	} {
+		l := launch{RemoteControl: tc.rc, RemoteControlName: "w7: proj-feature"}
+		if got := claudeCommand(tc.cmd, "proj-feature", l); got != tc.want {
+			t.Errorf("claudeCommand(%q, %+v) = %q, want %q", tc.cmd, l, got, tc.want)
 		}
 	}
 }
