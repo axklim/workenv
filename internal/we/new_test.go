@@ -332,6 +332,27 @@ func TestNewCreatesBranchNeverReadAsID(t *testing.T) {
 	}
 }
 
+// TestNewRemoteControlName: we new --rc names Remote Control from
+// remote_control_name with the new environment's id.
+func TestNewRemoteControlName(t *testing.T) {
+	fake := &execx.Fake{Responses: newBranchResponses}
+	env, _, _ := newEnvWithRepos(t, fake)
+	env.Cfg.RemoteControlName = "w{id}: {session}"
+
+	p, err := env.PlanNew([]string{"other", "review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := env.New(p, OpenOptions{NoTerminal: true, Session: "s", RemoteControl: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	want := startLine(env, "s", res.ID, "claude --name s --remote-control 'w1: s'")
+	if !slices.Contains(fake.Joined(), want) {
+		t.Errorf("missing %q in:\n%s", want, strings.Join(fake.Joined(), "\n"))
+	}
+}
+
 // TestNewFindsExistingEnvironment: new is find-or-create like open.
 func TestNewFindsExistingEnvironment(t *testing.T) {
 	fake := &execx.Fake{Responses: []execx.FakeResponse{noLiveSession, {Prefix: "git symbolic-ref --short -q HEAD", Out: "review"}}}

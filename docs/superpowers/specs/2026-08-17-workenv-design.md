@@ -430,7 +430,9 @@ every clone of a listed repository is covered.
   or `--name` keeps its own); with Remote Control on, `--remote-control
   <session>` is appended too, so the name the session is reachable under
   from another device is the same one (same rule: a `claude_cmd` that
-  passes `--remote-control` itself keeps its own); with `--model` or
+  passes `--remote-control` itself keeps its own; with
+  `remote_control_name` set, its rendering replaces `<session>` there,
+  shell-quoted, see *Remote Control*); with `--model` or
   `--effort`, `--model <name>` / `--effort <level>` are appended,
   shell-quoted, replacing the same flag in `claude_cmd`; with `--prompt`, the text goes last,
   shell-quoted, as claude's positional first prompt. Remote Control, model
@@ -464,6 +466,16 @@ starts the session: a session that is already live keeps the claude it
 runs. A session started with `--rc` records it, so recreating that session
 keeps Remote Control on. `attach` does not define `--rc`, like the creation
 overrides.
+
+**`remote_control_name`** is a template for the name Remote Control is
+given in place of the session name, such as `"w{id}: {session}"`, so the
+app shows the id one agent needs to reach a worker. `{id}` is the
+environment's id and `{session}` the sanitized session name; any other
+`{…}` is a config error. It applies wherever repair starts claude with
+Remote Control — `--rc` on `open` or `new`, `remote_control`, a recorded
+`--rc` on a recreated session — and changes nothing else: the tmux session
+and `--name` keep the session name, since tmux refuses the colon. Unset,
+the name is the session name.
 
 With `--rc`, `open` and `new` then wait for Remote Control to come up and
 print `rc: <url>` as the last line of stdout — what a caller handing the
@@ -625,6 +637,8 @@ claude_cmd    = "claude"       # command run in the first tmux window,
                                # with --name <session> appended
 remote_control = false         # also append --remote-control <session>;
                                # `we open --rc` does it for one open
+remote_control_name = ""       # name for --remote-control instead of the
+                               # session; {id} and {session}, see Commands
 trust_clones  = false          # pre-accept claude's trust dialog for a
                                # repository open or new clones; see Placement
 default_owner = ""             # GitHub owner `we new <name> <branch>` clones
@@ -661,7 +675,7 @@ runner, asserting exact argv and the persisted registry:
 - **we** — each resolution path above; claude running versus a shell; issue and PR converging on one
   environment; adoption of an existing worktree; refusal to adopt an untagged
   session; repair of a missing worktree and session, with Remote Control
-  from the config or `--rc`, with an initial prompt and with a model and
+  from the config or `--rc` and named by `remote_control_name`, with an initial prompt and with a model and
   effort; launch flags recorded on start, applied again on a recreated
   session and replaced by a later flag, but not by one a live session
   ignored; `--continue` with its fresh fallback; the running marker left on

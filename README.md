@@ -100,7 +100,8 @@ session name is an error rather than a new branch. `--branch`, `--session` and
 `--wt` apply only when an environment is created — `attach` doesn't define
 them, and `open` says so on stderr when it ignored them. `--rc` starts
 `claude` with Remote Control under the session's name, for picking the session
-up from another device; `remote_control = true` does it for every environment.
+up from another device; `remote_control = true` does it for every environment,
+and `remote_control_name` sets another name for it.
 `--prompt "<text>"` gives `claude` its first prompt when the session is
 started, so it gets to work without anyone typing; a session that is already
 running is left alone, with a note on stderr. `--model <name>` and
@@ -160,6 +161,9 @@ claude_cmd    = "claude"       # command run in the first tmux window,
                                # with --name <session> appended
 remote_control = false         # also append --remote-control <session>;
                                # `we open --rc` does it for one open
+remote_control_name = ""       # the name for --remote-control instead of
+                               # the session: {id} and {session} are
+                               # replaced, e.g. "w{id}: {session}"
 trust_clones  = false          # mark a repository open or new clones as
                                # trusted in ~/.claude.json, so claude does
                                # not stop on its trust dialog there

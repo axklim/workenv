@@ -101,7 +101,8 @@ stderr which flags it ignored. `attach` does not accept them. `--rc`,
   `rc: trust-dialog` at once if claude stops on its trust dialog). A
   running session answers at once if it has Remote Control, else times out.
   `remote_control = true` in the config starts every session with it, but
-  only `--rc` prints the link.
+  only `--rc` prints the link. `remote_control_name = "w{id}: {session}"`
+  names it with the environment id instead.
 - `--prompt "TEXT"` — claude's first prompt, typed in as soon as it starts.
   This is how one agent hands work to another; the text arrives verbatim.
 - `--model NAME`, `--effort LEVEL` — claude's model and effort for this
@@ -133,7 +134,8 @@ state in `ls`, `gc` and `[aliases]` arrived in 0.2.0; `--model` and
 `--effort` arrived in 0.2.4; recorded launch flags, `--continue` on a
 recreated session, the `interrupted` state, `we new`, `[no_workers]`,
 `delete` without a target and the `rc:` line arrived in 0.3.0; `we new`
-cloning a missing repository and `default_owner` arrive after 0.4.0. `we version` says which you have, `we new --help` whether it has `new`.
+cloning a missing repository and `default_owner` arrived in 0.5.0;
+`remote_control_name` arrives after 0.5.1. `we version` says which you have, `we new --help` whether it has `new`.
 
 ## Reading back
 
@@ -181,7 +183,8 @@ target it is the environment the cwd is in, so a session can remove itself.
 repositories live and get cloned, `~/projects`); `claude_cmd` (first-window
 command, `claude` — `we` appends `--name <session>`, plus `--remote-control
 <session>` when Remote Control is on, unless the command passes them itself);
-`remote_control` (`false`); `trust_clones` (`false`; answers claude's trust
+`remote_control` (`false`); `remote_control_name` (template for the Remote
+Control name, `{id}` and `{session}`, unset = the session name); `trust_clones` (`false`; answers claude's trust
 dialog for a repository `open` or `new` clones); `default_owner` (GitHub
 owner `we new <name> <branch>` clones a bare name from); `worktree_path` (template for new
 worktree locations); `remote_we` (path of `we` on `--host` machines);

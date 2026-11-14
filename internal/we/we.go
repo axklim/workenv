@@ -417,6 +417,7 @@ func (e *Env) repairSession(env *state.Env, created bool, l launch) (started boo
 	if err := os.WriteFile(marker, nil, 0o600); err != nil {
 		return false, err
 	}
+	l.RemoteControlName = e.Cfg.RemoteControlNameFor(env.ID, naming.Sanitize(env.TmuxSession))
 	cmd := claudeCommand(e.Cfg.ClaudeCmd, env.TmuxSession, l) + "; rm -f " + execx.ShellQuote(marker)
 	return true, e.tmux().RunInFirstWindow(env.TmuxSession, cmd)
 }
@@ -433,8 +434,11 @@ func (e *Env) runningMarker(id int) string {
 // launch is what shapes claude when repair starts the session.
 type launch struct {
 	RemoteControl bool
-	Model, Effort string
-	Prompt        string
+	// RemoteControlName is the remote_control_name rendered for the
+	// environment; empty means the session name.
+	RemoteControlName string
+	Model, Effort     string
+	Prompt            string
 	// Continue resumes the conversation last run in the worktree: the
 	// environment has had a session before.
 	Continue bool
@@ -444,6 +448,8 @@ type launch struct {
 // Control is on, --remote-control <session> as well, so the name claude
 // shows and the name it is reachable under both match the tmux session; a
 // cmd that already passes either flag keeps its own value for it. A
+// non-empty RemoteControlName replaces the session in --remote-control,
+// shell-quoted. A
 // non-empty model or effort is appended shell-quoted as --model / --effort,
 // replacing cmd's own: it was asked for this one environment. A non-empty
 // prompt goes last, shell-quoted, as claude's positional prompt.
@@ -458,7 +464,11 @@ func claudeCommand(cmd, session string, l launch) string {
 		cmd += " --name " + name
 	}
 	if l.RemoteControl && !hasFlag(cmd, "--remote-control") {
-		cmd += " --remote-control " + name
+		rc := name
+		if l.RemoteControlName != "" {
+			rc = execx.ShellQuote(l.RemoteControlName)
+		}
+		cmd += " --remote-control " + rc
 	}
 	if l.Model != "" {
 		cmd = withoutFlag(cmd, "--model") + " --model " + execx.ShellQuote(l.Model)

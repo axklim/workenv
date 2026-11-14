@@ -105,6 +105,26 @@ func TestParseRemoteControlIsBoolean(t *testing.T) {
 	}
 }
 
+// TestParseRemoteControlName: the template takes {id} and {session}; an
+// unknown placeholder is a config error, not a literal in every name.
+func TestParseRemoteControlName(t *testing.T) {
+	cfg, err := parse(`remote_control_name = "w{id}: {session}"`, "/home/u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.RemoteControlNameFor(42, "proj-x"); got != "w42: proj-x" {
+		t.Errorf("RemoteControlNameFor = %q, want %q", got, "w42: proj-x")
+	}
+	if got := (Config{}).RemoteControlNameFor(42, "proj-x"); got != "" {
+		t.Errorf("RemoteControlNameFor without a template = %q, want empty", got)
+	}
+	for _, raw := range []string{`remote_control_name = "w{ID}"`, `remote_control_name = "{branch}"`} {
+		if _, err := parse(raw, "/home/u"); err == nil || !strings.Contains(err.Error(), "remote_control_name") {
+			t.Errorf("parse(%q) error = %v, want a remote_control_name error", raw, err)
+		}
+	}
+}
+
 func TestEmptyPathsFallBackToDefaults(t *testing.T) {
 	home := "/home/u"
 	raw := `

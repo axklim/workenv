@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 
 	"workenv/internal/naming"
@@ -27,6 +30,10 @@ type Config struct {
 	RemoteWe string
 	// RemoteControl also starts claude with --remote-control <session>.
 	RemoteControl bool
+	// RemoteControlName is the template of the name claude is given for
+	// Remote Control, with {id} and {session} placeholders; empty means
+	// the session name.
+	RemoteControlName string
 	// TrustClones pre-accepts claude's trust dialog for a repository open
 	// or new clones.
 	TrustClones bool
@@ -51,6 +58,15 @@ func (c Config) NoWorkersFor(repo string) (key, hint string, ok bool) {
 		}
 	}
 	return "", "", false
+}
+
+// RemoteControlNameFor renders RemoteControlName for environment id in
+// session, or returns "" when no template is set.
+func (c Config) RemoteControlNameFor(id int, session string) string {
+	if c.RemoteControlName == "" {
+		return ""
+	}
+	return strings.NewReplacer("{id}", strconv.Itoa(id), "{session}", session).Replace(c.RemoteControlName)
 }
 
 // AliasFor returns the alias of the repository named repo, or repo itself
@@ -146,6 +162,11 @@ func parse(raw, home string) (Config, error) {
 				return Config{}, fmt.Errorf("config line %d: default_owner %q must be a GitHub user or organization", i+1, val)
 			}
 			cfg.DefaultOwner = val
+		case "remote_control_name":
+			if m := placeholder.FindAllString(val, -1); slices.ContainsFunc(m, func(p string) bool { return p != "{id}" && p != "{session}" }) {
+				return Config{}, fmt.Errorf("config line %d: remote_control_name %q: only {id} and {session} can be used", i+1, val)
+			}
+			cfg.RemoteControlName = val
 		case "remote_control", "trust_clones":
 			b, err := parseBool(val)
 			if err != nil {
@@ -223,6 +244,8 @@ func parseBool(val string) (bool, error) {
 	}
 	return false, fmt.Errorf("must be true or false, got %q", val)
 }
+
+var placeholder = regexp.MustCompile(`\{[^{}]*\}`)
 
 var retiredKeyMap = map[string]string{
 	"projects_dir":  "projects_path",
