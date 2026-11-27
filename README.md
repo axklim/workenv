@@ -194,14 +194,19 @@ branch is adopted rather than duplicated.
 
 ## Claude Code skills
 
-Three skills give any Claude Code session — one `we` opened included — slash
+Four skills give any Claude Code session — one `we` opened included — slash
 commands to start and remove work environments of its own:
 
 - `/workenv:open <repo | alias | repo URL | issue URL | .> [name]` runs `we new …
   --no-terminal --rc` and reports the session and its Remote Control link; it
   also teaches a session the rest of `we` (targets, flags, reading `we ls`).
-- `/workenv:close [target]` runs `we delete --delete-branch`, the current
-  environment when no target is given.
+- `/workenv:leftovers [target]` says what closing would lose: uncommitted,
+  unpushed or unmerged work, stash entries, and what lives only in the
+  conversation. It also answers "is something left here?", and deletes
+  nothing.
+- `/workenv:close [target] [now]` runs that check, then `we delete
+  --delete-branch` when nothing would be lost, the current environment when
+  no target is given. `now` skips the check.
 - `/workenv:list` runs `we ls`.
 
 Every decision is `we`'s own, so the skills stay thin. They come from the

@@ -50,6 +50,7 @@ Do not pick a branch, add `--repo`, or rephrase the arguments.
 | "back to environment 7 / session infra-review" | `we attach 7`, `we attach infra-review` (`open` works too) |
 | "what is running?" | `we ls` (`/workenv:list`) |
 | "details of 7" | `we show 7` |
+| "is something left here?", "can I close this session?" | `/workenv:leftovers` (deletes nothing) |
 | "tear down 7", "remove this session" | `we delete 7`, `we delete` (`/workenv:close`) |
 | "clean up finished work" | `we gc --dry-run`, then `we gc` |
 

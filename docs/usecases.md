@@ -10,7 +10,8 @@ Worked examples, in the order a day tends to go. Paths assume
   branch
 - [When something breaks](#when-something-breaks) — a reboot, interrupted
   environments, a deleted worktree
-- [Placement and cleanup](#placement-and-cleanup) — one-off paths, tearing down
+- [Placement and cleanup](#placement-and-cleanup) — one-off paths, tearing down,
+  checking what is left first
 - [On another machine](#on-another-machine) — `--host`
 - [From another device](#from-another-device) — `--rc`
 - [Handing work to a new session](#handing-work-to-a-new-session) — `--prompt`
@@ -284,6 +285,27 @@ No target means the environment whose worktree holds the cwd, the one `ls`
 marks with `*`. Since the session is killed only after everything else is
 gone, an agent can run this from inside the session it removes: the session
 ends with the command, and nothing is left half done.
+
+#### Ask what is left before closing
+
+```
+/workenv:leftovers        # in the session: "is something left here?"
+/workenv:close            # checks the same, then deletes
+/workenv:close now        # deletes without the check
+```
+
+The `workenv` plugin's skills, in a Claude Code session. `leftovers` only
+reports: uncommitted files, commits not pushed, the branch's PR, commits not
+on the default branch when there is no PR, stash entries of the branch, a
+main checkout behind its remote, and what exists only in the conversation —
+a decision written nowhere, a promise not kept, an open question. Its answer
+is two lines, **Lost if you close** and **Yours**, or "Nothing is left."
+
+`close` runs that check first and deletes only when nothing would be lost;
+otherwise it gives the same answer and waits. What only waits for you does
+not block: it is the last thing `close` says. `now` skips the check but is
+not `--force`, which still needs your own word. For another environment as
+the target, only its repository is checked.
 
 ### Clear out merged work
 
